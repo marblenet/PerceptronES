@@ -15,6 +15,7 @@ import (
 	"perceptronsre/internal/engine"
 	"perceptronsre/internal/model"
 	"perceptronsre/internal/report"
+	"perceptronsre/internal/simulation"
 )
 
 func TestListenLoopbackBindsOnlyIPv4Loopback(t *testing.T) {
@@ -65,15 +66,37 @@ func TestDashboardServesPageAndLatestReport(t *testing.T) {
 		!strings.Contains(pageHTML, "Event timeline and provenance") ||
 		!strings.Contains(pageHTML, "Runtime configuration") ||
 		!strings.Contains(pageHTML, "Engine Store") ||
+		!strings.Contains(pageHTML, "Available core capabilities") ||
+		!strings.Contains(pageHTML, "Security posture engine") ||
+		!strings.Contains(pageHTML, "data-capability=\"security-posture\"") ||
+		!strings.Contains(pageHTML, "data-capability=\"simulation\"") ||
+		!strings.Contains(pageHTML, "Available · synthetic only") ||
+		!strings.Contains(pageHTML, "Available · evidence-driven") ||
+		!strings.Contains(pageHTML, "Simulation page") ||
+		!strings.Contains(pageHTML, "simulation-tab") ||
+		!strings.Contains(pageHTML, "mission-factors") ||
+		!strings.Contains(pageHTML, "Synthetic measurements") ||
+		!strings.Contains(pageHTML, "All synthetic events") ||
+		!strings.Contains(pageHTML, "Complete simulation report") ||
+		!strings.Contains(pageHTML, "Run isolated simulation") ||
+		!strings.Contains(pageHTML, "Required security checks") ||
+		!strings.Contains(pageHTML, "Manually supplied security evidence") ||
+		!strings.Contains(pageHTML, "Security posture findings") ||
+		!strings.Contains(pageHTML, "enabled findings qualify mission status") ||
 		!strings.Contains(pageHTML, "main/external/") ||
 		!strings.Contains(pageHTML, "plugin-settings") ||
 		!strings.Contains(pageHTML, "Policy metadata is declarative") ||
 		!strings.Contains(pageHTML, "threshold-cpu-warning") ||
 		!strings.Contains(pageHTML, "Enabled engines") ||
 		!strings.Contains(pageHTML, "read-only refresh") ||
+		!strings.Contains(pageHTML, "Unknown is a valid result") ||
+		!strings.Contains(pageHTML, "GREEN requires complete, valid, fresh required evidence") ||
+		!strings.Contains(pageHTML, "Event_ID: ") ||
+		!strings.Contains(pageHTML, "Event_ID:\"Event_ID: \"") ||
+		!strings.Contains(pageHTML, "(event.derives_from || []).map(id => \"Event_ID: \" + id)") ||
 		!strings.Contains(pageHTML, "textContent") ||
 		!strings.Contains(pageHTML, "does not retain the 60 seconds before an incident") {
-		t.Fatal("dashboard page is missing pyramid levels, provenance, refresh control, safety semantics, or safe text insertion")
+		t.Fatal("dashboard page is missing pyramid levels, available security/simulation capabilities, philosophy guardrails, labeled event IDs, refresh control, safety semantics, or safe text insertion")
 	}
 	levels := []string{"Mission decision", "Root-cause assessment", "Reasoning engines", "Components", "Source evidence and event record"}
 	lastIndex := -1
@@ -154,8 +177,68 @@ func TestEngineCatalogIncludesBuiltInsAndPolicy(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&entries); err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 2 || entries[0].Name != "host-pressure" || entries[0].Policy.Mode != "reasoning_only" {
+	if len(entries) != 3 || entries[0].Name != "host-pressure" || entries[0].Policy.Mode != "reasoning_only" || entries[2].Name != "security-posture" {
 		t.Fatalf("catalog is missing built-in engine policy metadata: %#v", entries)
+	}
+}
+
+func TestDashboardRunsIsolatedSimulationWithoutReplacingLiveReport(t *testing.T) {
+	cfg := config.Default()
+	store, err := config.NewStore("unused-simulation-dashboard-test.json", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dashboard := New()
+	dashboard.SetConfigStore(store)
+	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/api/simulate", strings.NewReader(`{"scenario":"normal","inputs":{"cpu_percent":99,"memory_percent":40,"load_per_cpu":0.5,"filesystem_percent":50,"thresholds":{"cpu_percent":{"warning":85,"critical":95},"memory_percent":{"warning":85,"critical":95},"filesystem_percent":{"warning":85,"critical":95},"load_per_cpu":{"warning":1.5,"critical":3}}}}`))
+	request.Header.Set("Origin", "http://127.0.0.1:8080")
+	request.Header.Set("X-Requested-With", "PerceptronDashboard")
+	response := httptest.NewRecorder()
+	dashboard.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("simulation endpoint returned %d: %s", response.Code, response.Body.String())
+	}
+	var result simulation.Result
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.Synthetic || result.Report.Runtime.Mission == nil || result.Report.Runtime.Mission.Status != model.MissionRed ||
+		result.IncidentReport.Status != string(model.MissionRed) || len(result.IncidentReport.ContributingFactors) == 0 {
+		t.Fatalf("simulation endpoint returned unexpected result: %#v", result)
+	}
+	live := httptest.NewRecorder()
+	dashboard.Handler().ServeHTTP(live, httptest.NewRequest(http.MethodGet, "/api/report", nil))
+	if live.Code != http.StatusServiceUnavailable {
+		t.Fatalf("simulation unexpectedly populated/replaced live report: %d %s", live.Code, live.Body.String())
+	}
+}
+
+func TestDashboardSimulationRequiresSameOriginAndKnownScenario(t *testing.T) {
+	store, err := config.NewStore("unused-simulation-security-test.json", config.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dashboard := New()
+	dashboard.SetConfigStore(store)
+	handler := dashboard.Handler()
+
+	for _, test := range []struct {
+		name       string
+		body       string
+		origin     string
+		wantStatus int
+	}{
+		{name: "cross origin", body: `{"scenario":"normal"}`, origin: "http://attacker.invalid", wantStatus: http.StatusForbidden},
+		{name: "unknown scenario", body: `{"scenario":"arbitrary"}`, origin: "http://127.0.0.1:8080", wantStatus: http.StatusBadRequest},
+	} {
+		request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/api/simulate", strings.NewReader(test.body))
+		request.Header.Set("Origin", test.origin)
+		request.Header.Set("X-Requested-With", "PerceptronDashboard")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != test.wantStatus {
+			t.Errorf("%s: expected status %d, got %d: %s", test.name, test.wantStatus, response.Code, response.Body.String())
+		}
 	}
 }
 
@@ -253,6 +336,7 @@ func TestDashboardLoadsAndUpdatesConfiguration(t *testing.T) {
 	updated := loaded
 	updated.Thresholds.CPUPercent = config.Threshold{Warning: 70, Critical: 90}
 	updated.Engines = []string{}
+	updated.SecurityRequiredChecks = []string{"patch-posture", "certificate-expiry"}
 	body, err := json.Marshal(updated)
 	if err != nil {
 		t.Fatal(err)
@@ -277,7 +361,8 @@ func TestDashboardLoadsAndUpdatesConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if persisted.Thresholds.CPUPercent.Warning != 70 || len(persisted.Engines) != 0 {
+	if persisted.Thresholds.CPUPercent.Warning != 70 || len(persisted.Engines) != 0 ||
+		len(persisted.SecurityRequiredChecks) != 2 || persisted.SecurityRequiredChecks[0] != "patch-posture" {
 		t.Fatalf("configuration update did not persist values: %#v", persisted)
 	}
 

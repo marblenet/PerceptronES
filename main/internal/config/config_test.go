@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDefaultConfigIsValidAndPrintable(t *testing.T) {
@@ -71,6 +72,41 @@ func TestEmptyEngineSetIsValid(t *testing.T) {
 	cfg.Engines = []string{}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("empty engine configuration should be valid: %v", err)
+	}
+}
+
+func TestSecurityEvidenceValidation(t *testing.T) {
+	cfg := Default()
+	cfg.Engines = append(cfg.Engines, "security-posture")
+	cfg.SecurityEvidence = []SecurityEvidence{{
+		Check: "certificate-expiry", State: "WARNING", Source: "inventory-feed",
+		Summary: "Certificate expires soon.", ObservedAt: time.Now().UTC(),
+	}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid security evidence rejected: %v", err)
+	}
+	cfg.SecurityEvidence[0].State = "EXECUTE"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("unsupported security state must be rejected")
+	}
+	cfg.SecurityEvidence[0].State = "CRITICAL"
+	cfg.SecurityEvidence[0].ObservedAt = time.Time{}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("security evidence without observed_at must be rejected")
+	}
+}
+
+func TestSecurityRequiredChecksValidation(t *testing.T) {
+	cfg := Default()
+	cfg.SecurityRequiredChecks = []string{"patch-posture", "certificate-expiry"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid required security checks rejected: %v", err)
+	}
+	for _, checks := range [][]string{{""}, {" patch-posture"}, {"patch-posture", "patch-posture"}} {
+		cfg.SecurityRequiredChecks = checks
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("invalid required security checks accepted: %#v", checks)
+		}
 	}
 }
 

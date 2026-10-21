@@ -78,6 +78,22 @@ func TestWriteTextIncludesUnknownStatusAndReason(t *testing.T) {
 	}
 }
 
+func TestWriteTextIncludesSecurityFindings(t *testing.T) {
+	cycle := CycleReport{HostID: "host-1", Runtime: engine.CycleResult{
+		Mission: &model.MissionAssessment{SecurityFindings: []model.SecurityFinding{{
+			Check: "certificate-expiry", State: "WARNING", Source: "inventory-feed",
+			Freshness: "fresh", Explanation: "Certificate expires soon.",
+		}}},
+	}}
+	var output bytes.Buffer
+	if err := WriteText(&output, cycle); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Security findings:") || !strings.Contains(output.String(), "certificate-expiry: WARNING") {
+		t.Fatalf("text report omitted the security assessment: %s", output.String())
+	}
+}
+
 func TestWritePrometheusExportsCurrentEngineFindings(t *testing.T) {
 	value := 92.5
 	observationEvent, err := model.NewEvent("cycle-1", "host-observer", model.TypeObservation,
@@ -92,12 +108,19 @@ func TestWritePrometheusExportsCurrentEngineFindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	securityEvent, err := model.NewEvent("cycle-1", "security-posture", model.TypeSecurityFinding,
+		[]model.EntityRef{{Type: "host", ID: "host-1"}, {Type: "security-check", ID: "certificate-expiry"}},
+		[]string{observationEvent.ID}, model.ReasoningCalculated, model.SafetyReasoning,
+		model.SecurityFinding{Check: "certificate-expiry", State: "WARNING", Source: "inventory-feed"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	var output strings.Builder
-	cycle := CycleReport{HostID: "host-1", Runtime: engine.CycleResult{Events: []model.Event{observationEvent, healthEvent}}}
+	cycle := CycleReport{HostID: "host-1", Runtime: engine.CycleResult{Events: []model.Event{observationEvent, healthEvent, securityEvent}}}
 	if err := WritePrometheus(&output, cycle); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"perceptron_observation_value", "metric=\"cpu.utilization_percent\"", "perceptron_component_health", "state=\"DEGRADED\"", "perceptron_engine_finding"} {
+	for _, expected := range []string{"perceptron_observation_value", "metric=\"cpu.utilization_percent\"", "perceptron_component_health", "state=\"DEGRADED\"", "perceptron_engine_finding", "engine=\"security-posture\"", "state=\"WARNING\"", "scope=\"certificate-expiry\""} {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("Prometheus output missing %q: %s", expected, output.String())
 		}

@@ -76,6 +76,8 @@ func NewRuntime(cfg config.Config) (*Runtime, error) {
 			current = healthEngine{}
 		case "host-mission":
 			continue
+		case "security-posture":
+			current = securityEngine{}
 		default:
 			plugin, ok := plugins[name]
 			if !ok {
@@ -88,7 +90,7 @@ func NewRuntime(cfg config.Config) (*Runtime, error) {
 		}
 		engines = append(engines, current)
 	}
-	if err := validateEngineOrder(engines, []string{model.TypeObservation, model.TypeCycle}); err != nil {
+	if err := validateEngineOrder(engines, []string{model.TypeObservation, model.TypeSecurityObservation, model.TypeCycle}); err != nil {
 		return nil, err
 	}
 	configurationID, err := fingerprintConfig(cfg)
@@ -137,6 +139,30 @@ func (runtime *Runtime) Run(ctx context.Context, cycleID string, observations []
 		}
 		metrics.EventsPublished++
 	}
+	for i, evidence := range runtime.config.SecurityEvidence {
+		observation := model.SecurityObservation{
+			Check:      evidence.Check,
+			State:      evidence.State,
+			Source:     evidence.Source,
+			Summary:    evidence.Summary,
+			ObservedAt: evidence.ObservedAt.UTC(),
+		}
+		event, err := model.NewEventWithTimes(
+			evidence.ObservedAt, time.Now().UTC(), cycleID, "security-evidence-config",
+			model.TypeSecurityObservation,
+			[]model.EntityRef{{Type: "host", ID: runtime.config.HostID}, {Type: "security-check", ID: evidence.Check}},
+			nil, model.ReasoningObserved, model.SafetyInformational, observation,
+		)
+		if err != nil {
+			return CycleResult{}, fmt.Errorf("create security evidence event %d: %w", i, err)
+		}
+		event.ProducerVersion = model.CoreVersion
+		event.ConfigurationID = runtime.configurationID
+		if err := eventBus.Publish(ctx, event); err != nil {
+			return CycleResult{}, fmt.Errorf("publish security evidence %s: %w", evidence.Check, err)
+		}
+		metrics.EventsPublished++
+	}
 
 	for _, current := range runtime.engines {
 		inputs := eventBus.Select(cycleID, current.Consumes())
@@ -168,7 +194,11 @@ func (runtime *Runtime) Run(ctx context.Context, cycleID string, observations []
 		}
 		metrics.Engines[current.Name()] = engineMetrics
 	}
-	mission := missionEngine{hostID: runtime.config.HostID, dnsProbeName: runtime.config.DNSProbeName}
+	mission := missionEngine{
+		hostID: runtime.config.HostID, dnsProbeName: runtime.config.DNSProbeName,
+		securityPostureEnabled: contains(runtime.config.Engines, "security-posture"),
+		securityRequiredChecks: append([]string(nil), runtime.config.SecurityRequiredChecks...),
+	}
 	coreInputs := eventBus.Select(cycleID, mission.Consumes())
 	coreMetrics := EngineMetrics{Runs: 1}
 	coreStarted := time.Now()

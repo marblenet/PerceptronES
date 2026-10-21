@@ -29,6 +29,7 @@ Operational reasoning benefits from prior incidents and successful procedures, b
 - Surface applicability and limitations during investigation.
 - Preserve near misses as learning material.
 - Close the learning loop from incidents and investigations through validation and outcomes to reviewed knowledge updates.
+- Support converting reviewed incidents and near misses into reproducible regression scenarios without automatically promoting procedures or claims.
 
 ## 4. Non-goals
 
@@ -85,6 +86,8 @@ Future investigation
 ```
 
 This is a conceptual learning loop, not an automatic promotion pipeline. Each link must preserve provenance and time context so a consumer can determine where a runbook or lesson came from and which evidence supported its revision or trust change.
+
+Where an incident or near miss becomes a regression scenario, preserve its source, scope, relevant versions/configuration, expected behavior, and any redactions or synthetic substitutions. The scenario must remain distinguishable from a live observation, and a passing replay validates only the encoded scenario—not the universal correctness or current applicability of a runbook. Creating, editing, or approving operational knowledge remains subject to review.
 
 ## 7. Trust model
 

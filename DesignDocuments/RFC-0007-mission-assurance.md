@@ -13,7 +13,7 @@ This RFC defines Perceptron SRE's top-level mission assessment: whether the scop
 
 Mission assurance is not component-health aggregation. Healthy components do not by themselves prove that a mission is healthy, and an individual component failure does not necessarily mean the mission has failed if its objective remains achievable. GREEN, YELLOW, ORANGE, and RED are candidate mission states from the project vision. Their definitions, thresholds, precedence, transition behavior, and action authority are not established here.
 
-Mission aggregation is a core platform service, not an installable domain engine. Domain engines may supply pressure, health, impact, confidence, and other evidence; the core mission service combines those inputs and produces an explicit assessment, including `UNKNOWN` when required evidence is absent.
+Mission aggregation is a core platform service, not an installable domain engine. Domain engines may supply pressure, health, impact, confidence, and other evidence; the core mission service combines those inputs and produces an explicit assessment, including `UNKNOWN` when required evidence is absent, invalid, or insufficient. GREEN is earned only when all required evidence for the declared scope and objective is valid and sufficiently fresh; absence of evidence, engines, or alerts is never evidence of health.
 
 ## 2. Problem and motivation
 
@@ -115,13 +115,14 @@ Mission assurance informs response; RFC-0010 remains responsible for action auth
 - Low coverage and stale assessments are explicitly visible and cannot be presented as complete/current without qualification.
 - Status does not directly authorize production actions.
 - Tests cover cross-region aggregation and severe localized impact.
+- No missing, invalid, stale, contradictory, or unavailable required evidence can produce a favorable status by default; tests exercise these cases.
 - Recursive assurance reports when the platform's own degradation limits conclusions.
 
 ## 12. Open decisions
 
 1. What do GREEN, YELLOW, ORANGE, and RED mean operationally?
 2. Should mission assessment expose confidence, coverage, and freshness as separate outputs (ARCH-033)?
-3. Should UNKNOWN be a first-class mission state, and what should it mean (ARCH-034)?
+3. What are the exact taxonomy and transition semantics for mission states (ARCH-034)? `UNKNOWN` is required whenever the implementation cannot establish the requested assessment from required evidence.
 4. What inputs and aggregation rules determine status at each mission scope and across the scope hierarchy?
 5. How are missing inputs, conflicting truth, and confidence handled?
 6. How are observed and potential customer impacts represented in mission output?

@@ -10,7 +10,7 @@ Perceptron SRE (Site Reliability Engine) is an application in the **PerceptronES
 
 It is designed to work alongside existing monitoring and control systems—not replace them. Feed it metrics and events, let its engines add operational context, then send its findings back to the monitoring stack your team already uses.
 
-> **Development status:** early, working single-host prototype. The current Go binary collects Linux host observations, runs a small host pressure/health reasoning chain, produces a mission assessment and provenance, serves a loopback dashboard, and exposes current-cycle JSON and Prometheus metrics. Broader integrations, durable incident reports, package isolation, and automated mitigation are roadmap work, not current product capabilities.
+> **Development status:** early, working single-host prototype. The current Go binary collects Linux host observations, runs host pressure/health reasoning, optionally assesses operator-supplied security evidence, offers a separate bounded Simulation page with configurable synthetic inputs and full event reports, produces mission assessments and provenance, serves a loopback dashboard, and exposes current-cycle JSON and Prometheus metrics. Automated security scanners, broad integrations, durable incident history, package isolation, and automated mitigation are not current capabilities.
 
 ## Why Perceptron SRE?
 
@@ -50,6 +50,8 @@ Perceptron SRE is **not an unbounded LLM making operational decisions**. The cur
 - Run a single binary on a Linux host to collect CPU, memory, filesystem, load, network, and process observations.
 - Optionally probe DNS resolution for a configured name.
 - Run the current host pressure and health engines and receive a core mission assessment.
+- Optionally enable the bundled security-posture engine to assess configured, source-attributed security evidence; stale/missing evidence cannot support a favorable mission state.
+- Explore baseline, pressure, missing/stale evidence, and security scenarios on a separate Simulation page. Adjust synthetic measurements and thresholds, then inspect the generated incident summary, all events, and full report without changing the live report.
 - Inspect the assessment pyramid, component evidence, event lineage, and configuration in a local dashboard.
 - Adjust supported thresholds and collector configuration through a live-reloadable JSON file or dashboard.
 - Enable, disable, and order configured engines from the Engine Store page.
@@ -136,20 +138,27 @@ See [`main/README.md`](main/README.md) for the current implementation details, o
 
 - **Evidence over assertion:** show the input, source, time, scope, and derivation behind conclusions.
 - **Unknown is a real result:** missing or stale evidence is not healthy evidence.
+- **No default green:** favorable mission status requires complete, valid evidence for the configured scope.
+- **Deterministic where declared:** repeatability is an engine contract with explicit scope, not a blanket claim about every future extension.
+- **Test failure behavior:** missing, stale, contradictory, invalid, and unavailable inputs are part of the product's test surface.
 - **Separate reasoning from authority:** a finding or recommendation is not authorization.
 - **Bounded components:** engines have explicit contracts and responsibilities.
 - **Preserve existing systems:** integrate with legacy monitoring and owning control planes.
 - **Human escalation remains first-class:** unsafe, unsupported, or uncertain cases should produce a useful handoff.
 - **Earn autonomy:** automated mitigation requires explicit tools, least privilege, independent policy enforcement, approvals where required, validation, and outcome verification.
+- **Simulation before exposure:** use synthetic, reproducible scenarios and isolated validation before production workflows where applicable.
+- **Security is operational evidence:** security conditions should eventually contribute to mission reasoning with the same provenance and uncertainty discipline.
 
 ## Documentation
 
+- [Engineering philosophy](DesignDocuments/ENGINEERING-PHILOSOPHY.md)
 - [Overall architecture](DesignDocuments/01-overall-architecture.md)
 - [RFC index](DesignDocuments/RFC-INDEX.md)
 - [Implementation roadmap](Implementation/IMPLEMENTATION-ROADMAP.md)
 - [Architecture diagrams](DesignDocuments/diagrams/README.md)
 - [Core application guide](main/README.md)
 - [Engine plugin protocol](main/ENGINE-PLUGIN-PROTOCOL.md)
+- [Changelog](CHANGELOG.md)
 
 ## License
 

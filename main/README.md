@@ -2,6 +2,8 @@
 
 This directory contains the first single-host Go binary. It implements a deliberately narrow **observe → reason → explain** path. The reviewed architecture and implementation roadmap remain the source documents; this README records the executable's provisional choices and current limits without changing those documents.
 
+The project's reliability rationale and cross-cutting engineering guardrails are documented in [Engineering Philosophy](../DesignDocuments/ENGINEERING-PHILOSOPHY.md). In this prototype, that means explicit unknowns and visible failures—not claims of safety certification, trained neural-network reasoning, calibrated confidence, or production-grade autonomy.
+
 ## Requirements
 
 - Go 1.13 or newer.
@@ -45,7 +47,7 @@ Then open `http://127.0.0.1:8080` in the client browser. The SSH connection rema
 
 The app reads `perceptron.json` from the current directory by default and creates it with initial values when it does not exist. Use `--config path/to/config.json` to select another file. The file is checked before each collection cycle; a valid external edit is applied on the next cycle without restarting. Invalid edits are logged and the last-known-good configuration remains active. Dashboard edits are validated, atomically written to that same file, and applied on the next assessment cycle.
 
-The JSON configuration controls the host identifier, absolute Linux filesystem paths, CPU sample interval, maximum observation age, warning/critical thresholds, optional DNS probe target/timeout, and engine enablement. Unknown fields and invalid threshold ranges are rejected. The dashboard exposes current CPU, memory, filesystem, and per-CPU load warning/critical values, collector inputs, and engine enable/order controls. Example:
+The JSON configuration controls the host identifier, absolute Linux filesystem paths, CPU sample interval, maximum observation age, warning/critical thresholds, optional DNS probe target/timeout, security evidence, and engine enablement. Unknown fields and invalid threshold ranges are rejected. The dashboard exposes current CPU, memory, filesystem, and per-CPU load warning/critical values, collector inputs, manually supplied security evidence, and engine enable/order controls. Example:
 
 ```json
 {
@@ -61,11 +63,25 @@ The JSON configuration controls the host identifier, absolute Linux filesystem p
     "filesystem_percent": { "warning": 85, "critical": 95 },
     "load_per_cpu": { "warning": 1.5, "critical": 3 }
   },
-  "engines": ["host-pressure", "host-health"]
+  "engines": ["host-pressure", "host-health", "security-posture"],
+  "security_required_checks": ["certificate-expiry"],
+  "security_evidence": [
+    {
+      "check": "certificate-expiry",
+      "state": "WARNING",
+      "source": "certificate-inventory",
+      "summary": "Certificate expires within the operator review window.",
+      "observed_at": "2026-10-21T12:00:00Z"
+    }
+  ]
 }
 ```
 
 Set `"engines": []` to run the collection core with no domain reasoning engines. The core still emits observations and an `UNKNOWN` mission assessment with missing coverage; mission aggregation is a core service, not a plugin.
+
+The bundled `security-posture` engine is an evidence assessor, not a vulnerability scanner. It turns configured `security_evidence` records into provenance-linked findings (`HEALTHY`, `WARNING`, `CRITICAL`, or `UNKNOWN`) and marks evidence older than 24 hours or dated more than one minute into the future as `UNKNOWN`. Evidence must include a check name, source, summary, and RFC3339 observation time. The source is asserted metadata; this build does not independently verify it, inspect packages/CVEs, apply patches, or inspect certificates/hardening itself. Configure `security_required_checks` with the exact check names required for the intended scope. Coverage is complete only when each configured check has a corresponding finding; unrelated findings remain visible but cannot satisfy that check. If security-posture is enabled without a declared check scope, the mission reports a missing `security-scope` and cannot be GREEN. Findings remain separate from host component health and never authorize remediation.
+
+The separate **Simulation** dashboard page runs built-in deterministic synthetic scenarios for a normal baseline, CPU warning/critical pressure, missing/stale memory, and a critical security finding. It also accepts alternate synthetic CPU, memory, load, and filesystem measurements and threshold configuration. The API is `POST /api/simulate` with `{"scenario":"cpu-critical"}` (scenario IDs are `normal`, `cpu-warning`, `cpu-critical`, `missing-memory`, `stale-memory`, and `security-critical`); optional `inputs` may override synthetic measurements and thresholds. Results include a generated synthetic incident summary, all cycle events, and the complete report. They use isolated built-in engines and do not replace the live assessment, execute plugins, or perform actions.
 
 ### Engine extensions
 
@@ -79,6 +95,7 @@ The DNS probe is disabled unless `dns_probe_name` is explicitly configured. When
 
 - Events use an in-memory append-only store for each assessment cycle. Events have generated IDs, a cycle correlation ID, occurrence/emission times, source and producer version, a SHA-256 identity for the normalized runtime configuration, type/schema version, host/entity references, reasoning/safety classification, payload, and derivation links.
 - Bundled engines are currently compiled into the binary and run in-process; configured external engines use the versioned JSON process protocol. This is a transitional mismatch with the target that all domain engines use a common package boundary. An empty engine list is valid. The runtime validates output schemas, engine identity, event types, configuration/cycle provenance, and derivation lineage. Process boundaries do not sandbox plugins.
+- The optional bundled `security-posture` engine assesses operator-supplied security evidence records. When enabled, configured `security_required_checks` define the exact mission scope; each requires matching evidence, and an empty scope is explicitly incomplete. Warnings/critical findings qualify mission status, while stale, missing, or unknown evidence cannot support GREEN. It is not an automated scanner and never authorizes remediation. The separate Simulation page provides fixed synthetic host/security scenarios, measurement and threshold overrides, incident summaries, and full event reports; it is not a general scenario-authoring, production-replay, or twin system.
 - Linux collectors read CPU/load/memory/network/process data from `/proc` and filesystem utilization from `statfs`. Memory utilization requires an explicit `MemAvailable` field; older kernels without it report memory as unavailable rather than assuming zero available memory. Network values are cumulative byte counters, not rates. Process count is not process-level health.
 - An explicitly configured DNS probe is evaluated as a required mission component; its failure is a negative observation, while a missing/stale probe result remains unknown.
 - Pressure thresholds are prototype defaults and are configurable through JSON or the dashboard; edits are applied on the next collection cycle. They are not universal SLOs or policy. The load threshold is normalized by the Go runtime's detected CPU count.

@@ -71,6 +71,12 @@ func WritePrometheus(writer io.Writer, cycle CycleReport) error {
 			}
 			fmt.Fprintf(&output, "perceptron_mission_status{host_id=%s,state=%s} 1\n", host, prometheusLabel(string(mission.Status)))
 			writeEngineFinding(&output, host, event, string(mission.Status), mission.Scope.Type, mission.Scope.ID)
+		case model.TypeSecurityFinding:
+			var finding model.SecurityFinding
+			if err := json.Unmarshal(event.Payload, &finding); err != nil {
+				return fmt.Errorf("decode security finding event %s for Prometheus output: %w", event.ID, err)
+			}
+			writeEngineFinding(&output, host, event, finding.State, "security", finding.Check)
 		default:
 			if event.Classification.ReasoningKind == model.ReasoningCalculated {
 				writeEngineFinding(&output, host, event, "reported", "", eventScope(event))

@@ -47,6 +47,13 @@ func WriteText(writer io.Writer, cycle CycleReport) error {
 			fmt.Fprintf(&builder, "  - %s (%s): %s; evidence=%s; freshness=%s; %s\n",
 				component.Component, component.ScopeID, component.State, component.Coverage, component.Freshness, component.Explanation)
 		}
+		if len(mission.SecurityFindings) > 0 {
+			fmt.Fprintln(&builder, "Security findings:")
+			for _, finding := range mission.SecurityFindings {
+				fmt.Fprintf(&builder, "  - %s: %s; source=%s; freshness=%s; %s\n",
+					finding.Check, finding.State, finding.Source, finding.Freshness, finding.Explanation)
+			}
+		}
 	}
 	if mission != nil && len(mission.Coverage.MissingComponents) > 0 {
 		fmt.Fprintf(&builder, "Missing assessments: %s\n", strings.Join(mission.Coverage.MissingComponents, ", "))

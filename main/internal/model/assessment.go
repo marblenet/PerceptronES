@@ -3,11 +3,13 @@ package model
 import "time"
 
 const (
-	TypeObservation = "observation.host.v1"
-	TypeCycle       = "assessment.cycle.started.v1"
-	TypePressure    = "pressure.host.v1"
-	TypeHealth      = "health.host.v1"
-	TypeMission     = "mission.host.v1"
+	TypeObservation         = "observation.host.v1"
+	TypeCycle               = "assessment.cycle.started.v1"
+	TypePressure            = "pressure.host.v1"
+	TypeHealth              = "health.host.v1"
+	TypeMission             = "mission.host.v1"
+	TypeSecurityObservation = "observation.security.v1"
+	TypeSecurityFinding     = "security.finding.v1"
 )
 
 type CycleContext struct {
@@ -25,6 +27,25 @@ type Observation struct {
 	Available     bool      `json:"available"`
 	Reason        string    `json:"unavailable_reason,omitempty"`
 	ObservedAt    time.Time `json:"observed_at"`
+}
+
+type SecurityObservation struct {
+	Check      string    `json:"check"`
+	State      string    `json:"state"`
+	Source     string    `json:"source"`
+	Summary    string    `json:"summary"`
+	ObservedAt time.Time `json:"observed_at"`
+}
+
+type SecurityFinding struct {
+	Check       string    `json:"check"`
+	State       string    `json:"state"`
+	Source      string    `json:"source"`
+	Summary     string    `json:"summary"`
+	Freshness   string    `json:"freshness"`
+	ObservedAt  time.Time `json:"observed_at"`
+	EvaluatedAt time.Time `json:"evaluated_at"`
+	Explanation string    `json:"explanation"`
 }
 
 type PressureState string
@@ -89,13 +110,14 @@ const (
 )
 
 type MissionAssessment struct {
-	Scope       EntityRef          `json:"scope"`
-	Objective   string             `json:"objective"`
-	Status      MissionStatus      `json:"status"`
-	Disposition string             `json:"disposition"`
-	Coverage    Coverage           `json:"coverage"`
-	Freshness   string             `json:"freshness"`
-	EvaluatedAt time.Time          `json:"evaluated_at"`
-	Explanation string             `json:"explanation"`
-	Components  []HealthAssessment `json:"components"`
+	Scope            EntityRef          `json:"scope"`
+	Objective        string             `json:"objective"`
+	Status           MissionStatus      `json:"status"`
+	Disposition      string             `json:"disposition"`
+	Coverage         Coverage           `json:"coverage"`
+	Freshness        string             `json:"freshness"`
+	EvaluatedAt      time.Time          `json:"evaluated_at"`
+	Explanation      string             `json:"explanation"`
+	Components       []HealthAssessment `json:"components"`
+	SecurityFindings []SecurityFinding  `json:"security_findings,omitempty"`
 }

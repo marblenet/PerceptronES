@@ -28,6 +28,7 @@ The cascade combines measurements, tool results, historical knowledge, twin resu
 - Make uncertainty visible to operators and policy.
 - Prevent confidence from being treated as authorization.
 - Enable tests of evidence handling and confidence explanation.
+- Make missing, stale, contradictory, malformed, and unavailable evidence explicit rather than silently favorable.
 
 ## 4. Non-goals
 
@@ -156,6 +157,7 @@ An estimate must not be displayed as confirmed customer harm. Source, time windo
 - Confidence freshness or validity limitations can be represented without conflating confidence with source trust.
 - Coverage and confidence are represented as separate dimensions when an assessment has incomplete scope.
 - Tests demonstrate how contradictory and stale evidence affect results.
+- Tests demonstrate that insufficient, invalid, or unavailable evidence cannot produce unsupported certainty or a favorable result by default.
 - Action confidence is distinguishable from confidence in a root cause, impact, prediction, or outcome.
 - Low confidence can result in observation, further investigation, human verification, or escalation without being treated as an execution failure.
 - Rules for downstream use of confidence results define the required semantics, scope, time context, and evidence lineage.

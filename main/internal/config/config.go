@@ -24,15 +24,25 @@ type Thresholds struct {
 }
 
 type Config struct {
-	HostID            string     `json:"host_id"`
-	FilesystemPaths   []string   `json:"filesystem_paths"`
-	DNSProbeName      string     `json:"dns_probe_name,omitempty"`
-	DNSProbeTimeout   string     `json:"dns_probe_timeout"`
-	CPUSampleInterval string     `json:"cpu_sample_interval"`
-	MaxObservationAge string     `json:"max_observation_age"`
-	Thresholds        Thresholds `json:"thresholds"`
-	Engines           []string   `json:"engines"`
-	Plugins           []Plugin   `json:"plugins,omitempty"`
+	HostID                 string             `json:"host_id"`
+	FilesystemPaths        []string           `json:"filesystem_paths"`
+	DNSProbeName           string             `json:"dns_probe_name,omitempty"`
+	DNSProbeTimeout        string             `json:"dns_probe_timeout"`
+	CPUSampleInterval      string             `json:"cpu_sample_interval"`
+	MaxObservationAge      string             `json:"max_observation_age"`
+	Thresholds             Thresholds         `json:"thresholds"`
+	Engines                []string           `json:"engines"`
+	Plugins                []Plugin           `json:"plugins,omitempty"`
+	SecurityRequiredChecks []string           `json:"security_required_checks,omitempty"`
+	SecurityEvidence       []SecurityEvidence `json:"security_evidence,omitempty"`
+}
+
+type SecurityEvidence struct {
+	Check      string    `json:"check"`
+	State      string    `json:"state"`
+	Source     string    `json:"source"`
+	Summary    string    `json:"summary"`
+	ObservedAt time.Time `json:"observed_at"`
 }
 
 type Plugin struct {
@@ -149,9 +159,10 @@ func (cfg Config) Validate() error {
 		return errors.New("load_per_cpu threshold must satisfy 0 < warning < critical")
 	}
 	knownEngines := map[string]bool{
-		"host-pressure": true,
-		"host-health":   true,
-		"host-mission":  true,
+		"host-pressure":    true,
+		"host-health":      true,
+		"host-mission":     true,
+		"security-posture": true,
 	}
 	enabledEngines := make(map[string]bool)
 	for index, name := range cfg.Engines {
@@ -162,6 +173,37 @@ func (cfg Config) Validate() error {
 			return fmt.Errorf("engine %q is enabled more than once", name)
 		}
 		enabledEngines[name] = true
+	}
+	securityChecks := make(map[string]bool, len(cfg.SecurityEvidence))
+	requiredSecurityChecks := make(map[string]bool, len(cfg.SecurityRequiredChecks))
+	for index, check := range cfg.SecurityRequiredChecks {
+		if strings.TrimSpace(check) == "" || check != strings.TrimSpace(check) {
+			return fmt.Errorf("security_required_checks[%d] must be a non-empty trimmed check name", index)
+		}
+		if requiredSecurityChecks[check] {
+			return fmt.Errorf("security required check %q is duplicated", check)
+		}
+		requiredSecurityChecks[check] = true
+	}
+	for index, evidence := range cfg.SecurityEvidence {
+		if strings.TrimSpace(evidence.Check) == "" || strings.TrimSpace(evidence.Source) == "" || strings.TrimSpace(evidence.Summary) == "" {
+			return fmt.Errorf("security_evidence[%d] requires check, source, and summary", index)
+		}
+		if evidence.Check != strings.TrimSpace(evidence.Check) || evidence.Source != strings.TrimSpace(evidence.Source) || evidence.Summary != strings.TrimSpace(evidence.Summary) {
+			return fmt.Errorf("security_evidence[%d] fields must not have surrounding whitespace", index)
+		}
+		if securityChecks[evidence.Check] {
+			return fmt.Errorf("security evidence check %q is duplicated", evidence.Check)
+		}
+		securityChecks[evidence.Check] = true
+		switch evidence.State {
+		case "HEALTHY", "WARNING", "CRITICAL", "UNKNOWN":
+		default:
+			return fmt.Errorf("security_evidence[%d] state must be HEALTHY, WARNING, CRITICAL, or UNKNOWN", index)
+		}
+		if evidence.ObservedAt.IsZero() {
+			return fmt.Errorf("security_evidence[%d] observed_at is required", index)
+		}
 	}
 	for index, plugin := range cfg.Plugins {
 		if strings.TrimSpace(plugin.Name) == "" || strings.TrimSpace(plugin.Version) == "" ||

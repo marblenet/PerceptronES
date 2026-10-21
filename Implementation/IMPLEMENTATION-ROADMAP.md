@@ -35,6 +35,11 @@ The implementation should progressively demonstrate that Perceptron SRE can:
 - **Avoid premature persistence and federation.** Do not introduce a database, broker, knowledge service, twin fleet, or regional fabric in the single-host proof unless an accepted requirement demands it.
 - **Gate each expansion.** A phase is complete only when its observable outcomes, failure cases, and exit criteria are demonstrated.
 - **Do not mistake review readiness for approval.** Resolve implementation-critical decisions in a short decision record or accepted RFC before depending on them.
+- **Treat tests as product assurance.** For each reasoning behavior, test normal and boundary inputs as well as missing, stale, contradictory, invalid, and unavailable evidence where applicable. Failures must be visible and must not become healthy results.
+- **Scope determinism claims.** Record the inputs, engine version, and configuration that define repeatability; compare decisions and explanation content separately from timestamps and generated identifiers.
+- **Make simulation reproducible.** Use labeled synthetic fixtures for repeatable failure and recovery scenarios; never report synthetic impact as observed customer impact.
+- **Carry incidents forward with review.** Turn incidents and near misses into regression scenarios where useful, preserving provenance and requiring review of any derived knowledge or procedure.
+- **Include security in operational evidence as the relevant engine is developed.** Do not imply the current prototype assesses or guarantees security posture.
 
 ## 4. Roadmap at a glance
 
@@ -154,10 +159,11 @@ Every observation records its source and time. Unsupported collectors or unavail
 
 #### 1.4 Reasoning cascade
 
-Implement only:
+Implement the baseline cascade, plus optional security evidence when its engine is enabled:
 
 ```text
 Observation → Pressure → Health → Mission assessment
+Security evidence → Security posture finding ──────┘
 ```
 
 Use transparent, deterministic initial rules. Avoid machine learning, LLMs, inferred root cause, automated investigation, policy actions, and hidden threshold defaults.
@@ -172,6 +178,7 @@ Produce a mission assessment with:
 - Coverage and freshness limitations.
 - Human-readable explanation linking claims to evidence.
 - Explicit unknown/degraded reporting when required inputs are absent.
+- Unrecognized or invalid domain states are rejected or represented as unknown; they cannot leave the mission in a favorable state.
 
 ### Deliverables
 
@@ -179,9 +186,12 @@ Produce a mission assessment with:
 - Configuration, logs, and metrics sufficient to operate the prototype.
 - Host observation events and engine-produced pressure/health assessments.
 - Operator engine catalog/Store and per-engine configuration surfaces.
+- Optional security-posture assessment of operator-supplied evidence, explicitly separated from automated scanning, mission impact, and remediation.
+- Bounded synthetic simulation scenarios routed through isolated built-in engines and displayed separately from live reports.
 - Bulk findings API and bounded Prometheus scrape output, with explicit current-cycle/no-retention semantics.
 - Mission status with an explanation tree or equivalent navigable provenance.
 - Automated tests for event validation, engine behavior, missing/stale inputs, and assessment output.
+- Repeatable synthetic fixtures for normal, threshold-boundary, missing, stale, unavailable, and invalid-state cases; deterministic decision content is asserted for identical inputs/configuration.
 - A reproducible demo using captured or synthetic fixtures; live host observation is separately identifiable.
 
 ### Exit criteria
@@ -189,8 +199,11 @@ Produce a mission assessment with:
 - A single binary starts, collects configured observations, runs registered engines, and emits a mission assessment.
 - An operator can trace each assessment to its source observations and see missing or stale inputs.
 - Repeating the same fixture and configuration produces the documented result.
+- No incomplete, invalid, or unavailable required evidence can yield GREEN; failures are surfaced explicitly rather than defaulting to healthy.
 - No production action, DNS traffic interception, database, knowledge service, twin, or distributed component is required.
 - Process isolation is not described as a sandbox; no plugin receives tools/scripts or production action authority.
+- Security evidence must preserve source and observed time; stale or future-dated records are UNKNOWN. When security-posture is enabled, each `security_required_checks` entry requires an exact matching finding; an empty list leaves security scope incomplete and cannot support GREEN. When disabled, security is outside the configured mission scope.
+- Simulation cannot execute plugins, read/write host state, replace a live report, or authorize an action; its scenario outputs are labeled synthetic.
 
 ## 7. Phase 2 — Local DNS service and traffic
 

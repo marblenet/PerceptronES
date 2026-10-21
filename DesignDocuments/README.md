@@ -8,16 +8,17 @@ The implementation sequence is maintained separately in the [Implementation Road
 
 ## Reading order
 
-1. [Overall Architecture](01-overall-architecture.md) — system purpose, boundaries, logical components, principal workflows, and architecture decisions still open.
-2. [RFC index](RFC-INDEX.md) — status, dependency notes, and proposed implementation order for the first ten contracts.
-3. RFC-0001 through RFC-0004 — event model, engine runtime, operational entities, evidence and confidence.
-4. RFC-0010 — policy and safety governance.
-5. RFC-0008 and RFC-0009 — investigation and organizational knowledge.
-6. RFC-0006 — twin architecture.
-7. RFC-0005 — DNS Traffic Handler.
-8. RFC-0007 — mission assurance.
-9. [RFC-0012: Engine Store and Telemetry Interoperability](RFC-0012-engine-store-and-telemetry-interoperability.md) — engine catalog, package governance, and legacy metrics interoperability.
-10. Follow-on RFCs in the overall architecture roadmap — simulation, DNS integration, security, deployment, and other concerns.
+1. [Engineering Philosophy](ENGINEERING-PHILOSOPHY.md) — rationale behind the evidence, reliability, determinism, and safety guardrails.
+2. [Overall Architecture](01-overall-architecture.md) — system purpose, boundaries, logical components, principal workflows, and architecture decisions still open.
+3. [RFC index](RFC-INDEX.md) — status, dependency notes, and proposed implementation order for the first ten contracts.
+4. RFC-0001 through RFC-0004 — event model, engine runtime, operational entities, evidence and confidence.
+5. RFC-0010 — policy and safety governance.
+6. RFC-0008 and RFC-0009 — investigation and organizational knowledge.
+7. RFC-0006 — twin architecture.
+8. RFC-0005 — DNS Traffic Handler.
+9. RFC-0007 — mission assurance.
+10. [RFC-0012: Engine Store and Telemetry Interoperability](RFC-0012-engine-store-and-telemetry-interoperability.md) — engine catalog, package governance, and legacy metrics interoperability.
+11. Follow-on RFCs in the overall architecture roadmap — simulation, DNS integration, security, deployment, and other concerns.
 
 ## Architecture diagrams
 

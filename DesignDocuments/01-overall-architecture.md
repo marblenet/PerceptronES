@@ -75,7 +75,7 @@ The platform is not, by itself:
 
 ## 4. Foundational principles
 
-The following combine principles established in the source design with proposed refinements from the additional concepts. Each subsection identifies when a point is proposed or remains unresolved; proposed refinements should not be treated as finalized implementation requirements until reviewed.
+The rationale and implementation guidance for these principles are collected in the [Engineering Philosophy](ENGINEERING-PHILOSOPHY.md). The principles below combine established direction with proposed refinements; unresolved choices remain open and must not be silently treated as settled.
 
 ### 4.1 Mission assurance, not monitoring as the end goal
 
@@ -220,6 +220,19 @@ The following are proposed architecture guardrails. RFCs and implementations sho
 8. **DNS analytical consumers do not block the DNS response fast path.**
 
 The handling of cases where a preferred safety step is unavailable must be defined by policy and action class; this list does not imply that validation can always be performed.
+
+### 4.24 Reliability and evidence invariants
+
+The following guardrails apply to implementation and review:
+
+1. **No default green:** a favorable mission state requires valid, sufficiently fresh evidence for all required inputs in the declared scope. A running process or missing alert is not proof of health.
+2. **Unknown is a valid outcome:** missing, stale, unavailable, contradictory, malformed, or insufficient evidence remains explicit. Invalid output or runtime failure must be surfaced, not converted to a success-shaped result.
+3. **Determinism is declared and scoped:** deterministic engines must reproduce their decision and explanation content for the same normalized inputs, engine version, and configuration. Variable evaluation metadata (for example, timestamps and generated IDs) is not itself a changed decision. Non-deterministic behavior and its scope must be declared.
+4. **Tests include behavior and failure:** tests cover normal and boundary behavior plus missing, stale, contradictory, invalid, and unavailable inputs, and relevant failures. Synthetic fixtures enable reproducible replay; simulation is required before production exposure where applicable.
+5. **Security is reliability evidence:** security-relevant conditions should eventually be assessed with the same evidence, scope, freshness, coverage, and uncertainty semantics as other operational domains. This is a direction for future engines, not a current prototype capability.
+6. **Incidents can inform regression tests, not auto-promote knowledge:** incident-derived scenarios or knowledge require preserved provenance and review; prior success alone does not establish current applicability or authorization.
+
+The [Engineering Philosophy](ENGINEERING-PHILOSOPHY.md) explains these invariants. They do not imply certification to aerospace, medical, or industrial standards; any such claim would require a separate applicable assurance process.
 
 ## 5. System context and boundaries
 

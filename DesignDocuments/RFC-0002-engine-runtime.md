@@ -89,6 +89,8 @@ An engine must state where it participates in the operational reasoning model (f
 - Health and resource-reporting contract.
 - Statefulness and persistence requirements, if any.
 
+Determinism is a scoped declaration, not an inference from using rules or a fixed seed. A deterministic engine must produce the same decision and explanation content for identical normalized inputs, engine version, and configuration. Evaluation timestamps, generated IDs, and other explicitly variable metadata may differ without changing the decision. Engines that depend on nondeterministic sources must identify those sources and the affected outputs. Replay and audit claims are limited to the declared, tested behavior.
+
 Illustrative metadata only:
 
 ```yaml
@@ -248,6 +250,8 @@ Engines capable of tools, storage, twin access, or production actions require le
 - Stateless engines can be replayed/tested from declared inputs; stateful engines document and test their state lifecycle.
 - Engine health is distinguishable from domain health.
 - Determinism and replay expectations are declared and tested for representative engine classes.
+- Deterministic fixtures produce the same decision and explanation content for identical versioned inputs/configuration, excluding explicitly variable metadata.
+- Missing, stale, contradictory, malformed, and unavailable dependencies cannot be converted into success-shaped engine results.
 
 ## 18. Open decisions
 

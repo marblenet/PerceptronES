@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -76,6 +77,20 @@ func TestConfigurationFingerprintChangesWithRules(t *testing.T) {
 	}
 }
 
+func TestPressureAssessmentIsDeterministicForFixedInputsAndTime(t *testing.T) {
+	engine, err := newPressureEngine(config.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := availableObservation("cpu.utilization_percent", "cpu", 90, "percent")
+	evaluatedAt := time.Now().UTC()
+	first := engine.assess(observation, evaluatedAt)
+	second := engine.assess(observation, evaluatedAt)
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("same input and evaluation time produced different assessments:\nfirst:  %#v\nsecond: %#v", first, second)
+	}
+}
+
 func TestRuntimeSupportsNoEnabledEngines(t *testing.T) {
 	cfg := config.Default()
 	cfg.Engines = []string{}
@@ -95,6 +110,143 @@ func TestRuntimeSupportsNoEnabledEngines(t *testing.T) {
 	}
 	if got := len(result.Events); got != 2+len(healthyObservations()) {
 		t.Fatalf("engine-free cycle should retain cycle, observation, and core mission events; got %d", got)
+	}
+}
+
+func TestSecurityPostureEngineProducesEvidenceLinkedFinding(t *testing.T) {
+	cfg := config.Default()
+	cfg.Engines = []string{"security-posture"}
+	cfg.SecurityEvidence = []config.SecurityEvidence{{
+		Check: "certificate-expiry", State: "WARNING", Source: "inventory-feed",
+		Summary: "Certificate expires within the review window.", ObservedAt: time.Now().UTC(),
+	}}
+	runtime, err := NewRuntime(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runtime.Run(context.Background(), "cycle-security-test", nil)
+	if err != nil {
+		t.Fatalf("security assessment cycle failed: %v", err)
+	}
+	var observedID, findingID string
+	for _, event := range result.Events {
+		switch event.Type {
+		case model.TypeSecurityObservation:
+			observedID = event.ID
+		case model.TypeSecurityFinding:
+			findingID = event.ID
+			var finding model.SecurityFinding
+			if err := json.Unmarshal(event.Payload, &finding); err != nil {
+				t.Fatal(err)
+			}
+			if finding.Check != "certificate-expiry" || finding.State != "WARNING" || finding.Source != "inventory-feed" {
+				t.Fatalf("security evidence was not assessed faithfully: %#v", finding)
+			}
+		}
+	}
+	if observedID == "" || findingID == "" || result.Metrics.Engines["security-posture"].Runs != 1 {
+		t.Fatalf("security evidence/finding or engine metrics are missing: %#v", result)
+	}
+	foundLineage := false
+	for _, event := range result.Events {
+		if event.ID == findingID && len(event.DerivesFrom) == 1 && event.DerivesFrom[0] == observedID {
+			foundLineage = true
+		}
+	}
+	if !foundLineage {
+		t.Fatal("security finding does not preserve its source evidence lineage")
+	}
+}
+
+func TestSecurityPostureFindingQualifiesMissionStatus(t *testing.T) {
+	cfg := config.Default()
+	cfg.Engines = append(cfg.Engines, "security-posture")
+	cfg.SecurityRequiredChecks = []string{"patch-posture"}
+	cfg.SecurityEvidence = []config.SecurityEvidence{{
+		Check: "patch-posture", State: "CRITICAL", Source: "security-inventory",
+		Summary: "Synthetic test finding: critical patch exposure.", ObservedAt: time.Now().UTC(),
+	}}
+	runtime, err := NewRuntime(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runtime.Run(context.Background(), "cycle-security-critical", healthyObservations())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Mission.Status != model.MissionRed || !result.Mission.Coverage.Complete || len(result.Mission.SecurityFindings) != 1 {
+		t.Fatalf("critical enabled security finding did not qualify the mission: %#v", result.Mission)
+	}
+}
+
+func TestEnabledSecurityPostureWithoutEvidencePreventsGreen(t *testing.T) {
+	cfg := config.Default()
+	cfg.Engines = append(cfg.Engines, "security-posture")
+	runtime, err := NewRuntime(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runtime.Run(context.Background(), "cycle-security-coverage-gap", healthyObservations())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Mission.Status != model.MissionUnknown || result.Mission.Coverage.Complete {
+		t.Fatalf("enabled security engine without evidence allowed a favorable mission: %#v", result.Mission)
+	}
+	if len(result.Mission.Coverage.MissingComponents) != 1 || result.Mission.Coverage.MissingComponents[0] != "security-scope" {
+		t.Fatalf("security evidence gap was not identified: %#v", result.Mission.Coverage)
+	}
+}
+
+func TestSecurityCoverageRequiresExactConfiguredChecks(t *testing.T) {
+	cfg := config.Default()
+	cfg.Engines = append(cfg.Engines, "security-posture")
+	cfg.SecurityRequiredChecks = []string{"patch-posture"}
+	cfg.SecurityEvidence = []config.SecurityEvidence{{
+		Check: "certificate-expiry", State: "HEALTHY", Source: "security-inventory",
+		Summary: "Synthetic test evidence.", ObservedAt: time.Now().UTC(),
+	}}
+	runtime, err := NewRuntime(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runtime.Run(context.Background(), "cycle-security-check-mismatch", healthyObservations())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Mission.Status != model.MissionUnknown || result.Mission.Coverage.Complete {
+		t.Fatalf("out-of-scope evidence incorrectly completed security coverage: %#v", result.Mission)
+	}
+	if len(result.Mission.Coverage.MissingComponents) != 1 || result.Mission.Coverage.MissingComponents[0] != "security:patch-posture" {
+		t.Fatalf("missing configured check was not identified: %#v", result.Mission.Coverage)
+	}
+
+	cfg.SecurityEvidence[0].Check = "patch-posture"
+	runtime, err = NewRuntime(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = runtime.Run(context.Background(), "cycle-security-check-match", healthyObservations())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Mission.Status != model.MissionGreen || !result.Mission.Coverage.Complete {
+		t.Fatalf("matching fresh security evidence did not complete coverage: %#v", result.Mission)
+	}
+}
+
+func TestSecurityAssessmentMarksStaleEvidenceUnknown(t *testing.T) {
+	now := time.Now().UTC()
+	observation := model.SecurityObservation{
+		Check: "patch-posture", State: "HEALTHY", Source: "inventory-feed",
+		Summary: "All packages current.", ObservedAt: now.Add(-25 * time.Hour),
+	}
+	finding, err := assessSecurity(observation, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finding.State != "UNKNOWN" || finding.Freshness != "stale" {
+		t.Fatalf("stale security evidence was not marked unknown: %#v", finding)
 	}
 }
 
@@ -337,6 +489,19 @@ func TestRuntimeWithNoObservationsEmitsUnknownMission(t *testing.T) {
 	}
 	if result.Mission.Status != model.MissionUnknown || result.Mission.Coverage.Complete {
 		t.Fatalf("empty cycle was not represented as unknown/incomplete: %#v", result.Mission)
+	}
+}
+
+func TestMissionTreatsUnrecognizedHealthStateAsUnknown(t *testing.T) {
+	components := []model.HealthAssessment{
+		{Component: "cpu", State: model.HealthHealthy, ScopeID: "host-a", Freshness: "fresh"},
+		{Component: "memory", State: model.HealthState("UNRECOGNIZED"), ScopeID: "host-a", Freshness: "fresh"},
+		{Component: "load", State: model.HealthHealthy, ScopeID: "host-a", Freshness: "fresh"},
+		{Component: "filesystem", State: model.HealthHealthy, ScopeID: "host-a", Freshness: "fresh"},
+	}
+	mission := assessMission("host-a", "", components, time.Now().UTC())
+	if mission.Status != model.MissionUnknown || mission.Disposition != "unable_to_assess" {
+		t.Fatalf("unrecognized health state produced a favorable mission: %#v", mission)
 	}
 }
 

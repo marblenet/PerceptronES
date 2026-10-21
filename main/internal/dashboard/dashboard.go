@@ -16,6 +16,7 @@ import (
 	"perceptronsre/internal/engine"
 	"perceptronsre/internal/model"
 	"perceptronsre/internal/report"
+	"perceptronsre/internal/simulation"
 )
 
 type Dashboard struct {
@@ -141,6 +142,7 @@ func (dashboard *Dashboard) Handler() http.Handler {
 	mux.HandleFunc("/api/engines", dashboard.handleEngines)
 	mux.HandleFunc("/api/config", dashboard.handleConfig)
 	mux.HandleFunc("/api/tools/refresh", dashboard.handleRefresh)
+	mux.HandleFunc("/api/simulate", dashboard.handleSimulation)
 	mux.HandleFunc("/metrics", dashboard.handleMetrics)
 	mux.HandleFunc("/healthz", dashboard.handleHealth)
 	return securityHeaders(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -259,6 +261,7 @@ func (dashboard *Dashboard) handleEngines(writer http.ResponseWriter, request *h
 	entries := []engineCatalogEntry{
 		{Name: "host-pressure", Version: model.CoreVersion, Category: "host health", Role: "pressure", Source: "bundled", Enabled: enabled["host-pressure"], Policy: config.EnginePolicy{Mode: "reasoning_only", ReadOnly: true}, Consumes: []string{model.TypeObservation}, Produces: []string{model.TypePressure}},
 		{Name: "host-health", Version: model.CoreVersion, Category: "host health", Role: "health", Source: "bundled", Enabled: enabled["host-health"], Policy: config.EnginePolicy{Mode: "reasoning_only", ReadOnly: true}, Consumes: []string{model.TypePressure}, Produces: []string{model.TypeHealth}},
+		{Name: "security-posture", Version: model.CoreVersion, Category: "security", Role: "security assessment", Source: "bundled", Enabled: enabled["security-posture"], Policy: config.EnginePolicy{Mode: "reasoning_only", ReadOnly: true}, Consumes: []string{model.TypeSecurityObservation}, Produces: []string{model.TypeSecurityFinding}},
 	}
 	for _, plugin := range cfg.Plugins {
 		entries = append(entries, engineCatalogEntry{
@@ -271,6 +274,45 @@ func (dashboard *Dashboard) handleEngines(writer http.ResponseWriter, request *h
 	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	writer.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(writer).Encode(entries); err != nil {
+		return
+	}
+}
+
+func (dashboard *Dashboard) handleSimulation(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		writer.Header().Set("Allow", http.MethodPost)
+		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !sameOriginDashboardRequest(request) {
+		http.Error(writer, "same-origin dashboard request required", http.StatusForbidden)
+		return
+	}
+	dashboard.mu.RLock()
+	store := dashboard.configStore
+	dashboard.mu.RUnlock()
+	if store == nil {
+		http.Error(writer, "simulation requires an available runtime configuration", http.StatusServiceUnavailable)
+		return
+	}
+	var input struct {
+		Scenario string            `json:"scenario"`
+		Inputs   simulation.Inputs `json:"inputs"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 8192))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		http.Error(writer, "invalid simulation request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	result, err := simulation.RunScenarioWithInputs(request.Context(), store.Current(), input.Scenario, input.Inputs)
+	if err != nil {
+		http.Error(writer, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
+	writer.Header().Set("Cache-Control", "no-store")
+	if err := json.NewEncoder(writer).Encode(result); err != nil {
 		return
 	}
 }
@@ -402,7 +444,7 @@ func recommend(cycle report.CycleReport) Recommendation {
 	result := Recommendation{
 		RuleID:             "dashboard-advisory-v0.1",
 		Title:              "Continue observing",
-		Rationale:          "The current assessment does not report elevated pressure. This is an advisory, not authorization.",
+		Rationale:          "The current assessment does not report elevated host or configured security risk. This is an advisory, not authorization.",
 		ToolName:           "host-observation-refresh",
 		ToolDescription:    "Collect a fresh read-only host snapshot and recalculate the assessment. No changes are made to the host.",
 		EvidenceEventIDs:   make([]string, 0),
@@ -424,13 +466,23 @@ func recommend(cycle report.CycleReport) Recommendation {
 			unknown = append(unknown, component.Component)
 		}
 	}
+	for _, finding := range mission.SecurityFindings {
+		switch finding.State {
+		case "CRITICAL":
+			critical = append(critical, finding.Check)
+		case "WARNING":
+			degraded = append(degraded, finding.Check)
+		case "UNKNOWN":
+			unknown = append(unknown, finding.Check)
+		}
+	}
 	switch mission.Status {
 	case model.MissionRed:
-		result.Title = "Review critical pressure"
-		result.Rationale = "Critical pressure is reported for " + joinComponents(critical) + ". Review the evidence and use a fresh read-only collection to confirm current conditions; no remediation is authorized."
+		result.Title = "Review critical findings"
+		result.Rationale = "Critical findings are reported for " + joinComponents(critical) + ". Review the evidence and use a fresh read-only collection to confirm current conditions; no remediation is authorized."
 	case model.MissionYellow:
-		result.Title = "Verify elevated pressure"
-		result.Rationale = "Elevated pressure is reported for " + joinComponents(degraded) + ". Compare with a fresh read-only observation before deciding on an operational response."
+		result.Title = "Verify elevated findings"
+		result.Rationale = "Elevated findings are reported for " + joinComponents(degraded) + ". Compare with fresh read-only evidence before deciding on an operational response."
 		if len(unknown) > 0 {
 			result.Rationale += " Evidence is also unknown for " + joinComponents(unknown) + "."
 		}
@@ -446,7 +498,7 @@ func recommend(cycle report.CycleReport) Recommendation {
 			result.Rationale += " Evidence is also unknown for " + joinComponents(unknown) + "."
 		}
 	}
-	healthEventIDs := make(map[string]bool)
+	evidenceEventIDs := make(map[string]bool)
 	var missionEventID string
 	for _, event := range cycle.Runtime.Events {
 		switch event.Type {
@@ -455,16 +507,25 @@ func recommend(cycle report.CycleReport) Recommendation {
 			if err := json.Unmarshal(event.Payload, &assessment); err == nil {
 				for _, component := range mission.Components {
 					if component.Component == assessment.Component && component.Metric == assessment.Metric && component.ScopeID == assessment.ScopeID {
-						healthEventIDs[event.ID] = true
+						evidenceEventIDs[event.ID] = true
 					}
 				}
 			}
 		case model.TypeMission:
 			missionEventID = event.ID
+		case model.TypeSecurityFinding:
+			var finding model.SecurityFinding
+			if err := json.Unmarshal(event.Payload, &finding); err == nil {
+				for _, assessed := range mission.SecurityFindings {
+					if finding.Check == assessed.Check && finding.Source == assessed.Source && finding.ObservedAt.Equal(assessed.ObservedAt) {
+						evidenceEventIDs[event.ID] = true
+					}
+				}
+			}
 		}
 	}
 	for _, event := range cycle.Runtime.Events {
-		if healthEventIDs[event.ID] || event.ID == missionEventID {
+		if evidenceEventIDs[event.ID] || event.ID == missionEventID {
 			result.EvidenceEventIDs = append(result.EvidenceEventIDs, event.ID)
 		}
 	}
@@ -519,7 +580,7 @@ const indexHTML = `<!doctype html>
     :root{color-scheme:dark;--bg:#0b1020;--panel:#121a2c;--panel2:#172238;--line:#26344d;--text:#edf3ff;--muted:#92a2bd;--cyan:#6be3dc;--blue:#82aaff;--green:#45d6a0;--amber:#f3bd62;--red:#ff7185;--shadow:0 18px 55px #03071366}
     *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 85% -15%,#18304c 0,transparent 38%),var(--bg);color:var(--text);font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
     .shell{max-width:1200px;margin:0 auto;padding:38px 26px 56px}.top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:30px}.brand{display:flex;align-items:center;gap:14px}.mark{width:42px;height:42px;border:1px solid #6be3dc66;border-radius:14px;display:grid;place-items:center;color:var(--cyan);background:#6be3dc12;font-size:22px;font-weight:800}.eyebrow{color:var(--cyan);font-size:11px;text-transform:uppercase;letter-spacing:.18em;font-weight:750}.brand h1{font-size:20px;margin:2px 0 0;letter-spacing:-.03em}.connection{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:12px}.dot{height:8px;width:8px;border-radius:50%;background:var(--green);box-shadow:0 0 12px #45d6a088}.dot.offline{background:var(--red);box-shadow:0 0 12px #ff718588}
-    .hero{display:grid;grid-template-columns:1fr auto;align-items:center;gap:24px;padding:30px;border:1px solid var(--line);border-radius:22px;background:linear-gradient(120deg,#17243a,#111a2b 72%);box-shadow:var(--shadow)}.hero-copy{min-width:0}.hero-label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.14em}.hero h2{font-size:clamp(30px,5vw,48px);line-height:1.08;margin:8px 0 10px;letter-spacing:-.055em}.hero p{margin:0;color:#b5c2d8;max-width:760px}.badge{min-width:132px;text-align:center;padding:16px 18px;border:1px solid currentColor;border-radius:18px;font-size:18px;font-weight:800;letter-spacing:.09em;background:#ffffff08}.green{color:var(--green)}.yellow{color:var(--amber)}.red{color:var(--red)}.unknown{color:#b7c1d2}
+    .hero{display:grid;grid-template-columns:1fr auto;align-items:center;gap:24px;padding:30px;border:1px solid var(--line);border-radius:22px;background:linear-gradient(120deg,#17243a,#111a2b 72%);box-shadow:var(--shadow)}.hero-copy{min-width:0}.hero-label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.14em}.hero h2{font-size:clamp(22px,3vw,30px);line-height:1.15;margin:8px 0 7px;letter-spacing:-.035em}.hero p{margin:0;color:#b5c2d8;max-width:760px;font-size:12px}.mission-factors{margin:10px 0 0;padding-left:20px;color:#dce8fa;font-size:12px;display:grid;gap:4px}.badge{min-width:132px;text-align:center;padding:16px 18px;border:1px solid currentColor;border-radius:18px;font-size:18px;font-weight:800;letter-spacing:.09em;background:#ffffff08}.green{color:var(--green)}.yellow{color:var(--amber)}.red{color:var(--red)}.unknown{color:#b7c1d2}
     .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:18px 0 26px}.stat,.section{border:1px solid var(--line);border-radius:16px;background:linear-gradient(150deg,#151f32,#101827)}.stat{padding:17px 18px}.stat-label{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.12em}.stat-value{margin-top:5px;font-size:19px;font-weight:700;letter-spacing:-.025em;overflow-wrap:anywhere}.stat-note{color:var(--muted);font-size:12px;margin-top:3px}
     .section{padding:22px;margin-top:18px}.section-head{display:flex;justify-content:space-between;align-items:flex-end;gap:14px;margin-bottom:16px}.section h3{margin:0;font-size:16px;letter-spacing:-.02em}.section-sub{color:var(--muted);font-size:12px;margin-top:4px}.component-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.component{border:1px solid var(--line);border-radius:13px;padding:16px;background:#0d1524}.component-top{display:flex;align-items:center;justify-content:space-between;gap:12px}.component-name{font-weight:700;text-transform:capitalize}.state{font-size:10px;font-weight:800;letter-spacing:.1em;border-radius:999px;padding:4px 9px;background:#ffffff0d}.component p{color:#b3c0d4;font-size:13px;margin:12px 0 8px}.meta{display:flex;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:11px}
     .table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.12em;font-weight:700;padding:10px;border-bottom:1px solid var(--line)}td{padding:11px 10px;border-bottom:1px solid #26344d88;vertical-align:top}tbody tr:last-child td{border-bottom:0}.metric{font-weight:650}.value{font-variant-numeric:tabular-nums;color:#d8e5f8}.reason{color:var(--muted);max-width:420px}.empty{padding:24px;text-align:center;color:var(--muted)}
@@ -527,12 +588,15 @@ const indexHTML = `<!doctype html>
     .layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;align-items:start;gap:18px}.main-column{min-width:0}.sidebar{position:sticky;top:18px;max-height:calc(100vh - 36px);overflow:auto}.layout .section{margin-top:18px}.layout .main-column>.section:first-child{margin-top:0}.recommendation{border:1px solid #4b6484;border-radius:18px;padding:22px;background:linear-gradient(130deg,#1b2c43,#131d2e);box-shadow:var(--shadow)}.recommendation-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.recommendation h3{font-size:19px;margin:4px 0 7px}.recommendation p{color:#b8c6da;margin:0 0 14px}.action-btn{border:1px solid #6be3dc88;background:#6be3dc18;color:#c8fffa;padding:10px 14px;border-radius:11px;font:inherit;font-size:13px;font-weight:750;cursor:pointer;white-space:nowrap}.action-btn:hover:not(:disabled){background:#6be3dc30}.action-btn:disabled{opacity:.55;cursor:wait}.action-note{color:var(--muted);font-size:11px;margin-top:12px}.advisory{display:inline-flex;color:var(--amber);font-size:10px;text-transform:uppercase;letter-spacing:.12em;font-weight:800}.engine-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.engine-chip{border:1px solid var(--line);border-radius:11px;padding:11px;background:#0d1524}.engine-chip strong{display:block;font-size:12px}.engine-chip span{color:var(--muted);font-size:10px}.category-stack{display:grid;gap:14px}.category{border:1px solid var(--line);border-radius:15px;background:linear-gradient(150deg,#151f32,#101827);overflow:hidden}.category-head{display:flex;align-items:center;justify-content:space-between;padding:15px 17px;border-bottom:1px solid var(--line);background:#ffffff04}.category-title{font-weight:750}.category-note{color:var(--muted);font-size:11px;margin-top:2px}.category-items{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px}.metric-card{background:#0d1524;border:1px solid var(--line);border-radius:12px;padding:13px}.metric-card-head{display:flex;justify-content:space-between;align-items:center;gap:8px}.metric-name{font-size:13px;font-weight:700}.metric-value{font-size:18px;font-weight:750;font-variant-numeric:tabular-nums;margin:9px 0 3px}.metric-detail{font-size:11px;color:var(--muted);overflow-wrap:anywhere}.metric-card .meta{margin-top:9px;font-size:10px}.side-card{border:1px solid var(--line);border-radius:15px;background:linear-gradient(150deg,#151f32,#101827);padding:17px;margin-bottom:14px}.side-card h3{font-size:14px;margin:0 0 4px}.side-sub{font-size:11px;color:var(--muted);margin-bottom:13px}.rule-id{font:10px ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--cyan);overflow-wrap:anywhere}.evidence-list,.event-list{display:grid;gap:9px}.evidence-item{font:10px ui-monospace,SFMono-Regular,Consolas,monospace;color:#b8c7dc;overflow-wrap:anywhere}.evidence-link{background:transparent;border:0;text-align:left;padding:0;cursor:pointer}.evidence-link:hover{color:var(--cyan)}.timeline-item{border-left:1px solid #40516d;padding:0 0 10px 12px;position:relative;transition:background .2s}.timeline-item:before{content:"";position:absolute;left:-4px;top:4px;width:7px;height:7px;border-radius:50%;background:var(--blue)}.timeline-item.evidence-highlight{background:#6be3dc14;outline:1px solid #6be3dc66;border-radius:5px}.timeline-item strong{display:block;font-size:11px}.timeline-item span{display:block;color:var(--muted);font-size:10px;margin-top:2px;overflow-wrap:anywhere}.timeline-item code{color:#8fa2c0;font-size:9px}.tool-status{padding:9px;border:1px solid var(--line);border-radius:10px;color:#bac8dd;font-size:11px}.tool-status.completed{border-color:#45d6a066;color:var(--green)}.tool-status.running,.tool-status.queued{border-color:#f3bd6266;color:var(--amber)}.tool-status.failed{border-color:#ff718566;color:var(--red)}
     @media(max-width:1020px){.layout{grid-template-columns:minmax(0,1fr) 300px}.engine-list{grid-template-columns:1fr}}@media(max-width:780px){.layout{grid-template-columns:1fr}.sidebar{position:static;max-height:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.sidebar .side-card{margin:0}.sidebar .event-card{grid-column:1/-1}.engine-list{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:540px){.sidebar{grid-template-columns:1fr}.sidebar .event-card{grid-column:auto}.engine-list{grid-template-columns:1fr 1fr}.recommendation-head{flex-direction:column}.action-btn{width:100%}.category-items{grid-template-columns:1fr}.category-head{align-items:flex-start;gap:8px;flex-direction:column}}
     .decision-grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(320px,.9fr);gap:16px;align-items:stretch}.decision-grid .hero,.decision-grid .recommendation{min-height:100%;margin:0}.decision-grid .hero{padding:24px}.mission-facts{margin:14px auto 8px;max-width:1000px;grid-template-columns:repeat(4,minmax(0,1fr))}.mission-facts .stat{padding:13px 16px}.mission-facts .stat-value{font-size:16px}
-    .config-panel{margin-bottom:14px}.config-panel>summary{font-size:14px}.config-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}.config-grid label{display:grid;gap:6px;color:#b5c4da;font-size:12px}.config-grid input,.config-grid textarea,.config-thresholds input{width:100%;min-width:70px;border:1px solid #3a4c67;border-radius:8px;background:#0b1220;color:var(--text);padding:9px;font:inherit}.config-grid textarea{resize:vertical}.config-thresholds{margin:10px 0 16px}.engine-settings{border:1px solid var(--line);border-radius:12px;padding:12px}.engine-settings legend{color:#b5c4da;font-size:12px}.engine-options{display:flex;gap:10px;flex-wrap:wrap}.engine-option{display:flex;gap:7px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:#d2def0;font-size:12px}.engine-option small{display:block;color:var(--muted)}.engine-move{border:1px solid var(--line);border-radius:5px;background:#172238;color:#d2def0;cursor:pointer}.config-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:14px 0}.secondary-btn{border:1px solid #43536c;background:#111b2b;color:#d2def0;padding:10px 14px;border-radius:11px;font:inherit;font-size:13px;cursor:pointer}.config-plugin-note{color:var(--amber);font-size:11px}.config-error{color:var(--red)!important}
+    .config-panel{margin-bottom:14px}.config-panel>summary{font-size:14px}.config-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}.config-grid label{display:grid;gap:6px;color:#b5c4da;font-size:12px}.config-grid input,.config-grid textarea,.config-thresholds input,.config-actions select{width:100%;min-width:70px;border:1px solid #3a4c67;border-radius:8px;background:#0b1220;color:var(--text);padding:9px;font:inherit}.config-grid textarea{resize:vertical}.config-thresholds{margin:10px 0 16px}.engine-settings{border:1px solid var(--line);border-radius:12px;padding:12px}.engine-settings legend{color:#b5c4da;font-size:12px}.engine-options{display:flex;gap:10px;flex-wrap:wrap}.engine-option{display:flex;gap:7px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:#d2def0;font-size:12px}.engine-option small{display:block;color:var(--muted)}.engine-move{border:1px solid var(--line);border-radius:5px;background:#172238;color:#d2def0;cursor:pointer}.config-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:14px 0}.secondary-btn{border:1px solid #43536c;background:#111b2b;color:#d2def0;padding:10px 14px;border-radius:11px;font:inherit;font-size:13px;cursor:pointer}.config-plugin-note{color:var(--amber);font-size:11px}.config-error{color:var(--red)!important}
     .pyramid{display:flex;flex-direction:column;align-items:center;gap:14px;margin-top:14px}.tier{width:100%;min-width:0}.tier-diagnosis{width:82%}.tier-engines{width:88%}.tier-components{width:94%}.tier-evidence{width:100%}.tier .section{margin-top:0}.tier-label{display:flex;align-items:center;gap:10px;margin:0 0 9px 3px;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.14em;font-weight:750}.tier-number{display:grid;place-items:center;width:22px;height:22px;border:1px solid #47617e;border-radius:50%;color:var(--cyan);font-size:10px;letter-spacing:0}
     .diagnosis-summary{padding:17px;border:1px solid #344865;border-radius:13px;background:#0d1524;color:#dce8fa}.diagnosis-factors{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}.diagnosis-factor{padding:13px;border:1px solid var(--line);border-radius:11px;background:#111b2b}.diagnosis-factor p{margin:7px 0 0;color:#b3c0d4;font-size:12px}.diagnosis-footnote{margin:12px 0 0;color:var(--muted);font-size:11px}.reasoning-evidence{margin-top:13px;padding-top:12px;border-top:1px solid var(--line)}.incident-note{margin:0 0 14px;padding:11px 13px;border:1px solid #675637;border-radius:10px;background:#2c2416;color:#e9d5a8;font-size:12px}.timeline-item{position:relative}.timeline-time{color:var(--cyan);font-size:11px;font-variant-numeric:tabular-nums}.evidence-highlight{outline:2px solid var(--cyan);outline-offset:2px}.pyramid .table-wrap{border:1px solid var(--line);border-radius:12px;padding:0 10px}.tier-evidence .section+.section{margin-top:14px}
     @media(max-width:900px){.decision-grid{grid-template-columns:1fr}.decision-grid .hero{grid-template-columns:1fr auto}.tier-diagnosis,.tier-engines,.tier-components{width:100%}.config-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
     @media(max-width:780px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.hero{grid-template-columns:1fr auto;padding:22px}.section{padding:17px}}@media(max-width:540px){.shell{padding:24px 14px 40px}.top{align-items:flex-start}.connection{font-size:0}.connection .dot{flex:none}.hero{grid-template-columns:1fr}.badge{justify-self:start}.component-grid,.diagnosis-factors{grid-template-columns:1fr}.grid{gap:9px}.stat{padding:13px}.stat-value{font-size:16px}.section-head{align-items:flex-start;flex-direction:column}.action-btn{white-space:normal}.recommendation-head{flex-direction:column}.config-grid{grid-template-columns:1fr}}
     .page-nav{display:flex;gap:8px;margin:-12px 0 20px}.page-nav button{border:1px solid var(--line);border-radius:10px;padding:9px 14px;background:#111a2b;color:var(--muted);font:inherit;font-size:13px;cursor:pointer}.page-nav button[aria-current=page]{border-color:#6be3dc88;color:var(--cyan);background:#6be3dc12}.store-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.store-card{border:1px solid var(--line);border-radius:14px;padding:17px;background:#0d1524}.store-card h3{margin:0;font-size:15px}.store-card p{color:#b3c0d4;font-size:12px}.store-meta{display:flex;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:10px;margin-top:10px}.store-policy{font:11px ui-monospace,SFMono-Regular,Consolas,monospace;color:#c5d5eb;overflow-wrap:anywhere}.store-card button{margin-top:12px}.plugin-setting{display:grid;gap:6px;min-width:min(100%,360px);flex:1;color:#c5d5eb;font-size:11px}.plugin-setting textarea{width:100%;border:1px solid #3a4c67;border-radius:8px;background:#0b1220;color:var(--text);padding:9px;font:12px ui-monospace,SFMono-Regular,Consolas,monospace}
+    .simulation-inputs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.simulation-inputs label{display:grid;gap:6px;color:#b5c4da;font-size:11px}.simulation-inputs input{width:100%;min-width:0;border:1px solid #3a4c67;border-radius:8px;background:#0b1220;color:var(--text);padding:9px;font:inherit}.simulation-output{display:grid;gap:14px}.simulation-events{display:grid;gap:8px}.simulation-event{padding:11px;border:1px solid var(--line);border-radius:9px;background:#0d1524}.simulation-event code{display:block;margin-top:5px;color:var(--muted);font-size:10px}.simulation-factors{margin:8px 0;padding-left:20px}.simulation-report{overflow:auto;max-height:540px;padding:14px;background:#09111d;border:1px solid var(--line);border-radius:10px;font:11px ui-monospace,SFMono-Regular,Consolas,monospace;color:#c5d5eb}
+    @media(max-width:900px){.simulation-inputs{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:540px){.simulation-inputs{grid-template-columns:1fr}}
+    .planned-card{border-style:dashed;opacity:.86}.planned-status{display:inline-block;margin:9px 0 2px;padding:4px 8px;border:1px solid #f3bd6266;border-radius:999px;color:var(--amber);font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
     @media(max-width:540px){.store-grid{grid-template-columns:1fr}}
   </style>
 </head>
@@ -542,11 +606,11 @@ const indexHTML = `<!doctype html>
       <div class="brand"><div class="mark" aria-hidden="true">P</div><div><div class="eyebrow">Local operations</div><h1>Perceptron SRE</h1></div></div>
       <div class="connection"><span id="connection-dot" class="dot offline"></span><span id="connection">Connecting to local runtime…</span></div>
     </header>
-    <nav class="page-nav" aria-label="Dashboard pages"><button id="operations-tab" type="button" aria-current="page">Operations</button><button id="store-tab" type="button">Engine Store</button></nav>
+    <nav class="page-nav" aria-label="Dashboard pages"><button id="operations-tab" type="button" aria-current="page">Operations</button><button id="simulation-tab" type="button">Simulation</button><button id="store-tab" type="button">Engine Store</button></nav>
     <div id="operations-page">
     <section class="decision-grid" aria-label="Mission decision and recommended next step">
       <section class="hero" aria-live="polite">
-        <div class="hero-copy"><div class="hero-label" id="scope">Mission assessment</div><h2 id="objective">Waiting for first assessment</h2><p id="explanation">The dashboard will update as soon as the first observation cycle completes.</p></div>
+        <div class="hero-copy"><div class="hero-label" id="scope">Mission assessment</div><h2 id="mission-headline">Waiting for first assessment</h2><p>Objective: <span id="objective">Waiting for mission objective</span></p><ul id="mission-factors" class="mission-factors"><li>The dashboard will update as soon as the first observation cycle completes.</li></ul></div>
         <div id="mission-badge" class="badge unknown">WAITING</div>
       </section>
       <section class="recommendation" aria-live="polite"><div class="recommendation-head"><div><span class="advisory">Advisory · no automatic execution</span><h3 id="recommendation-title">Waiting for recommendation</h3><p id="recommendation-rationale">A recommendation will appear after the first assessment.</p></div><button id="refresh-tool" class="action-btn" type="button">Run read-only refresh</button></div><div class="action-note">Tool: <strong>host-observation-refresh</strong> · Collects current host metrics only; makes no system changes.</div><div id="tool-activity" class="tool-status" style="margin-top:12px">No dashboard-triggered tool run yet.</div></section>
@@ -568,6 +632,7 @@ const indexHTML = `<!doctype html>
         <tr><td>Load per CPU</td><td><input id="threshold-load-warning" type="number" step="0.1"></td><td><input id="threshold-load-critical" type="number" step="0.1"></td><td>load / CPU</td></tr>
       </tbody></table></div><p class="section-sub">Thresholds currently apply to CPU, memory, filesystem utilization, and load. Network counters and process count are observed but do not yet have pressure rules.</p></fieldset>
       <fieldset class="engine-settings"><legend>Configured external engine settings</legend><div id="plugin-settings" class="engine-options">No external engine settings.</div></fieldset>
+      <fieldset class="engine-settings"><legend>Security evidence input</legend><label class="plugin-setting">Required security checks (one exact check name per line)<textarea id="security-required-checks" rows="3" spellcheck="false"></textarea></label><p class="section-sub">When security-posture is enabled, every listed check must have a matching evidence record for coverage to be complete. Leave the list empty only if you want security scope explicitly incomplete (mission UNKNOWN absent a known warning/critical finding).</p><label class="plugin-setting">Manually supplied security evidence (JSON array)<textarea id="security-evidence" rows="6" spellcheck="false"></textarea></label><p class="section-sub">Evidence records require check, state (HEALTHY, WARNING, CRITICAL, or UNKNOWN), source, summary, and RFC3339 observed_at. Check names must match the required list exactly. This prototype assesses supplied evidence only; it does not scan hosts, install updates, or verify the source.</p></fieldset>
       <fieldset class="engine-settings"><legend>Enabled engines</legend><div id="engine-options" class="engine-options">Loading registered engines…</div><p class="section-sub">No engines is valid; that mode produces observations and events without domain assessments.</p></fieldset>
       <div class="config-actions"><button id="save-config" class="action-btn" type="submit">Save configuration</button><button id="discard-config" class="secondary-btn" type="button">Discard edits</button><span id="config-status" role="status" class="section-sub">No unsaved changes.</span></div>
       <p class="config-plugin-note">Plugins run as this application user and are not sandboxed. Current runtime only enables read-only plugins; policy declarations do not grant access to tools or scripts.</p>
@@ -575,7 +640,7 @@ const indexHTML = `<!doctype html>
     <div class="pyramid" role="region" aria-label="Assessment reasoning pyramid">
       <section class="tier tier-diagnosis">
         <div class="tier-label"><span class="tier-number">1</span> Root-cause assessment</div>
-        <section class="section" aria-labelledby="diagnosis-heading"><div class="section-head"><div><h3 id="diagnosis-heading">What is driving this assessment?</h3><div class="section-sub">Leading evidence and contributing component states; not a causal claim beyond the available evidence</div></div></div><div id="diagnosis-summary" class="diagnosis-summary">Waiting for assessment evidence…</div><div id="diagnosis-factors" class="diagnosis-factors"></div><p class="diagnosis-footnote">Unknown or unavailable evidence remains explicit; coverage does not imply health.</p><div class="reasoning-evidence"><div id="recommendation-rule" class="rule-id">Waiting for rule…</div><p id="recommendation-reason" class="section-sub">Waiting for evidence…</p><div id="recommendation-evidence" class="evidence-list"></div></div></section>
+        <section class="section" aria-labelledby="diagnosis-heading"><div class="section-head"><div><h3 id="diagnosis-heading">What is driving this assessment?</h3><div class="section-sub">Leading evidence and contributing component states; not a causal claim beyond the available evidence</div></div></div><div id="diagnosis-summary" class="diagnosis-summary">Waiting for assessment evidence…</div><div id="diagnosis-factors" class="diagnosis-factors"></div><p class="diagnosis-footnote">Unknown is a valid result. GREEN requires complete, valid, fresh required evidence; missing or stale evidence is never healthy by default. Recommendations are not authorization, and this prototype's rule-based findings are not proof of root cause.</p><div class="reasoning-evidence"><div id="recommendation-rule" class="rule-id">Waiting for rule…</div><p id="recommendation-reason" class="section-sub">Waiting for evidence…</p><div id="recommendation-evidence" class="evidence-list"></div></div></section>
       </section>
       <section class="tier tier-engines">
         <div class="tier-label"><span class="tier-number">2</span> Reasoning engines</div>
@@ -584,6 +649,7 @@ const indexHTML = `<!doctype html>
       <section class="tier tier-components">
         <div class="tier-label"><span class="tier-number">3</span> Components</div>
         <section class="section"><div class="section-head"><div><h3>Component health by category</h3><div class="section-sub">Signals grouped by domain with their derived component assessment</div></div></div><div id="components" class="category-stack"><div class="empty">Waiting for assessment data…</div></div></section>
+        <section class="section"><div class="section-head"><div><h3>Security posture findings</h3><div class="section-sub">Findings from configured security evidence; an empty list means no evidence was supplied, not that security is verified.</div></div></div><div id="security-findings" class="category-stack"><div class="empty">Waiting for security evidence…</div></div></section>
       </section>
       <section class="tier tier-evidence">
         <div class="tier-label"><span class="tier-number">4</span> Source evidence and event record</div>
@@ -593,8 +659,25 @@ const indexHTML = `<!doctype html>
       </section>
     </div>
     </div>
+    <section id="simulation-page" hidden>
+      <section class="section"><div class="section-head"><div><h2>Simulation lab</h2><div class="section-sub">Explore deterministic synthetic conditions and alternate thresholds without affecting the live system.</div></div></div><p class="incident-note">Simulation runs in a fresh built-in-engine runtime using synthetic inputs. It does not read or write host state, run plugins, replace the live report, or authorize actions. Results are clearly labeled synthetic and are not production observations.</p>
+        <div class="config-actions"><label for="simulation-scenario">Scenario</label><select id="simulation-scenario"><option value="normal">Normal baseline</option><option value="cpu-warning">Elevated CPU pressure</option><option value="cpu-critical">Critical CPU pressure</option><option value="missing-memory">Missing memory evidence</option><option value="stale-memory">Stale memory evidence</option><option value="security-critical">Security finding: critical</option></select></div>
+        <fieldset class="engine-settings"><legend>Synthetic measurements</legend><div class="simulation-inputs"><label>CPU utilization (%)<input id="sim-cpu" type="number" min="0" max="100" step="0.1" value="20"></label><label>Memory used (%)<input id="sim-memory" type="number" min="0" max="100" step="0.1" value="40"></label><label>Load per CPU<input id="sim-load" type="number" min="0" step="0.1" value="0.5"></label><label>Filesystem used (%)<input id="sim-filesystem" type="number" min="0" max="100" step="0.1" value="50"></label></div></fieldset>
+        <fieldset class="engine-settings"><legend>Simulation thresholds (warning / critical)</legend><div class="simulation-inputs"><label>CPU (%)<input id="sim-cpu-warning" type="number" min="0" max="100" step="0.1" value="85"><input id="sim-cpu-critical" type="number" min="0" max="100" step="0.1" value="95"></label><label>Memory (%)<input id="sim-memory-warning" type="number" min="0" max="100" step="0.1" value="85"><input id="sim-memory-critical" type="number" min="0" max="100" step="0.1" value="95"></label><label>Filesystem (%)<input id="sim-filesystem-warning" type="number" min="0" max="100" step="0.1" value="85"><input id="sim-filesystem-critical" type="number" min="0" max="100" step="0.1" value="95"></label><label>Load per CPU<input id="sim-load-warning" type="number" min="0" step="0.1" value="1.5"><input id="sim-load-critical" type="number" min="0" step="0.1" value="3"></label></div></fieldset>
+        <div class="config-actions"><button id="run-simulation" class="action-btn" type="button">Run isolated simulation</button><span id="simulation-status" class="section-sub" role="status">No simulation has been run.</span></div>
+      </section>
+      <div id="simulation-output" class="simulation-output" hidden>
+        <section class="section"><div class="section-head"><div><h3 id="simulation-incident-title">Synthetic incident report</h3><div id="simulation-incident-status" class="section-sub"></div></div></div><p id="simulation-incident-summary" class="diagnosis-summary"></p><h4>Contributing factors</h4><ul id="simulation-factors" class="simulation-factors"></ul><h4>Missing evidence</h4><ul id="simulation-missing" class="simulation-factors"></ul><h4>Suggested response</h4><ul id="simulation-recommendations" class="simulation-factors"></ul></section>
+        <section class="section"><div class="section-head"><div><h3>All synthetic events</h3><div id="simulation-event-meta" class="section-sub"></div></div></div><div id="simulation-events" class="simulation-events"></div></section>
+        <section class="section"><div class="section-head"><div><h3>Complete simulation report</h3><div class="section-sub">Includes inputs, incident summary, assessments, runtime metrics, and event payloads.</div></div></div><pre id="simulation-report" class="simulation-report"></pre></section>
+      </div>
+    </section>
     <section id="store-page" hidden>
       <section class="section"><div class="section-head"><div><h2>Engine Store</h2><div class="section-sub">All enabled reasoning modules, including Perceptron-maintained defaults, are catalogued here. Mission aggregation, event transport, policy enforcement, and dashboard services remain core responsibilities.</div></div></div><p class="section-sub">Enable or disable a read-only engine here. Configure per-engine settings in Operations → Runtime configuration. Policy declarations describe intent; they are not grants.</p><div id="store-status" class="section-sub" role="status">Loading the local engine catalog…</div><div id="store-entries" class="store-grid"></div></section>
+      <section class="section" aria-labelledby="core-capabilities-heading"><div class="section-head"><div><h2 id="core-capabilities-heading">Available core capabilities</h2><div class="section-sub">Security posture assessment and synthetic scenario simulation are available in this build with the limitations shown here.</div></div></div><div class="store-grid">
+        <article class="store-card" data-capability="simulation"><h3>Simulation lab</h3><span class="planned-status">Available · synthetic only</span><p>Explore deterministic baseline, pressure, stale/missing evidence, and security scenarios with adjustable measurements and thresholds. Full synthetic incident reports and event lineage are separate from live operations.</p><div class="store-meta">Type: core platform capability · Open the Simulation page</div></article>
+        <article class="store-card" data-capability="security-posture"><h3>Security posture engine</h3><span class="planned-status">Available · evidence-driven</span><p>Enable <code>security-posture</code> in the local engine catalog and provide current security evidence under Operations configuration. It assesses the supplied states, provenance, and freshness; enabled findings qualify mission status but do not alter host component health or authorize remediation.</p><div class="store-meta">Type: bundled domain engine · Requires supplied evidence</div></article>
+      </div></section>
       <section class="section"><h3>Contributing and installing engines</h3><p class="section-sub"><strong>Locally crafted:</strong> place a reviewed package under <code>main/external/&lt;engine-name&gt;</code>, document its manifest, versioned event schemas, source, settings, resource needs, and policy declaration, then add it to the local plugin configuration. Submit the package and protocol tests through the project's contribution process.</p><p class="section-sub"><strong>Third party:</strong> install only a versioned package from a source you trust, verify it independently, and declare it locally. This build has no remote marketplace, signature verification, automatic download, or sandbox. Untrusted executables must not be enabled.</p><p class="config-plugin-note">Policy metadata is declarative and is not a security sandbox: enabled external programs run with this application's OS privileges. Self-mitigation, tool, and script access remain disabled in core until an independently enforced broker exists.</p></section>
     </section>
     <footer class="footer"><span>Observe · Reason · Explain</span><span id="updated">No report received</span></footer>
@@ -609,7 +692,8 @@ const indexHTML = `<!doctype html>
     let configurationDirty = false;
     let currentConfiguration = null;
     let currentCatalog = [];
-    const builtInEngines = [{name:"host-pressure",description:"Pressure thresholds"},{name:"host-health",description:"Component health"}];
+    let simulationDefaultsLoaded = false;
+    const builtInEngines = [{name:"host-pressure",description:"Pressure thresholds"},{name:"host-health",description:"Component health"},{name:"security-posture",description:"Assess manually supplied, time-bounded security evidence"}];
     function setConfigStatus(message,isError) { const status=byId("config-status");status.textContent=message;status.className="section-sub"+(isError?" config-error":""); }
     function renderConfiguration(configuration) {
       if (!configuration || configurationDirty) return;
@@ -620,6 +704,8 @@ const indexHTML = `<!doctype html>
       byId("cfg-max-age").value=configuration.max_observation_age||"";
       byId("cfg-dns-timeout").value=configuration.dns_probe_timeout||"";
       byId("cfg-filesystems").value=(configuration.filesystem_paths||[]).join("\n");
+      byId("security-required-checks").value=(configuration.security_required_checks||[]).join("\n");
+      byId("security-evidence").value=JSON.stringify(configuration.security_evidence||[],null,2);
       const thresholdFields={cpu:["cpu_percent",configuration.thresholds.cpu_percent],memory:["memory_percent",configuration.thresholds.memory_percent],filesystem:["filesystem_percent",configuration.thresholds.filesystem_percent],load:["load_per_cpu",configuration.thresholds.load_per_cpu]};
       Object.keys(thresholdFields).forEach(key=>{const field=thresholdFields[key][1]||{};byId("threshold-"+key+"-warning").value=field.warning;byId("threshold-"+key+"-critical").value=field.critical;});
       const plugins=configuration.plugins||[];
@@ -639,6 +725,8 @@ const indexHTML = `<!doctype html>
       next.cpu_sample_interval=byId("cfg-cpu-interval").value.trim();
       next.max_observation_age=byId("cfg-max-age").value.trim();
       next.filesystem_paths=byId("cfg-filesystems").value.split(/\r?\n/).map(path=>path.trim()).filter(Boolean);
+      next.security_required_checks=byId("security-required-checks").value.split(/\r?\n/).map(check=>check.trim()).filter(Boolean);
+      next.security_evidence=JSON.parse(byId("security-evidence").value||"[]");
       const thresholdKeys={cpu:"cpu_percent",memory:"memory_percent",filesystem:"filesystem_percent",load:"load_per_cpu"};
       Object.keys(thresholdKeys).forEach(key=>{next.thresholds[thresholdKeys[key]]={warning:Number(byId("threshold-"+key+"-warning").value),critical:Number(byId("threshold-"+key+"-critical").value)};});
       (next.plugins||[]).forEach(plugin=>{const editor=[...byId("plugin-settings").querySelectorAll("textarea")].find(item=>item.dataset.plugin===plugin.name);if(editor)plugin.settings=JSON.parse(editor.value);});
@@ -661,8 +749,18 @@ const indexHTML = `<!doctype html>
       });
       byId("store-status").textContent=currentCatalog.length+" catalog engines. No remote packages are downloaded.";
     }
-    byId("operations-tab").addEventListener("click",()=>{byId("operations-page").hidden=false;byId("store-page").hidden=true;byId("operations-tab").setAttribute("aria-current","page");byId("store-tab").removeAttribute("aria-current");});
-    byId("store-tab").addEventListener("click",()=>{byId("operations-page").hidden=true;byId("store-page").hidden=false;byId("store-tab").setAttribute("aria-current","page");loadCatalog().catch(error=>byId("store-status").textContent=error.message||"Engine catalog unavailable.");});
+    function showPage(page) {
+      byId("operations-page").hidden=page!=="operations";
+      byId("simulation-page").hidden=page!=="simulation";
+      byId("store-page").hidden=page!=="store";
+      [["operations","operations-tab"],["simulation","simulation-tab"],["store","store-tab"]].forEach(([name,id])=>{
+        if(name===page)byId(id).setAttribute("aria-current","page");else byId(id).removeAttribute("aria-current");
+      });
+      if(page==="store")loadCatalog().catch(error=>byId("store-status").textContent=error.message||"Engine catalog unavailable.");
+    }
+    byId("operations-tab").addEventListener("click",()=>showPage("operations"));
+    byId("simulation-tab").addEventListener("click",()=>showPage("simulation"));
+    byId("store-tab").addEventListener("click",()=>showPage("store"));
     byId("configuration-form").addEventListener("input",()=>{configurationDirty=true;setConfigStatus("Unsaved changes.",false);});
     byId("configuration-form").addEventListener("change",()=>{configurationDirty=true;setConfigStatus("Unsaved changes.",false);});
     byId("discard-config").addEventListener("click",()=>{configurationDirty=false;renderConfiguration(currentConfiguration);});
@@ -772,15 +870,21 @@ const indexHTML = `<!doctype html>
     }
     function renderDiagnosis(mission) {
       const components = (mission.components || []).slice();
+      const security = (mission.security_findings || []).slice();
       const rank = {CRITICAL:0,DEGRADED:1,UNKNOWN:2,HEALTHY:3};
       components.sort((left,right) => (rank[left.state] == null ? 4 : rank[left.state]) - (rank[right.state] == null ? 4 : rank[right.state]));
       const leading = components.filter(item => item.state === "CRITICAL" || item.state === "DEGRADED");
-      const unknown = components.filter(item => item.state === "UNKNOWN");
+      const securityLeading = security.filter(item => item.state === "CRITICAL" || item.state === "WARNING");
+      const unknown = components.filter(item => item.state === "UNKNOWN").map(item => item.component).concat(security.filter(item => item.state === "UNKNOWN").map(item => item.check));
       byId("diagnosis-summary").textContent = leading.length
-        ? "Leading assessed contributors: " + leading.slice(0,3).map(item => item.component + " (" + item.state.toLowerCase() + ")").join(", ") + ". " + (mission.explanation || "Review the component evidence below.")
-        : (unknown.length
-          ? "No confirmed pressure contributor is available. Evidence is unknown for " + unknown.slice(0,3).map(item => item.component).join(", ") + ". " + (mission.explanation || "Do not infer health from missing evidence.")
-          : "No elevated component pressure is reported in this cycle. " + (mission.explanation || "Review the supporting evidence below."));
+        ? "Leading assessed contributors: " + leading.slice(0,3).map(item => item.component + " (" + item.state.toLowerCase() + ")").join(", ") + (securityLeading.length ? "; security: " + securityLeading.slice(0,3).map(item => item.check + " (" + item.state.toLowerCase() + ")").join(", ") : "") + ". " + (mission.explanation || "Review the component evidence below.")
+        : (securityLeading.length
+          ? "Security findings contributing to this assessment: " + securityLeading.slice(0,3).map(item => item.check + " (" + item.state.toLowerCase() + ")").join(", ") + ". " + (mission.explanation || "Review the finding evidence below.")
+          : (unknown.length
+            ? "No confirmed pressure contributor is available. Evidence is unknown for " + unknown.slice(0,3).join(", ") + ". " + (mission.explanation || "Do not infer health from missing evidence.")
+            : (mission.status === "UNKNOWN"
+              ? "The mission cannot be assessed as healthy because required evidence is incomplete or uncertain. " + (mission.explanation || "Review coverage and freshness.")
+              : "No elevated host or security risk is reported in this cycle. " + (mission.explanation || "Review the supporting evidence below."))));
       clear(byId("diagnosis-factors"));
       const factors = components.slice(0,4);
       if (!factors.length) byId("diagnosis-factors").append(text("div","empty","No component assessments are available."));
@@ -788,6 +892,21 @@ const indexHTML = `<!doctype html>
         const factor = text("article","diagnosis-factor","");
         factor.append(text("strong","",item.component + " · " + item.state),text("p","",item.explanation || "No component explanation supplied."));
         byId("diagnosis-factors").append(factor);
+      });
+    }
+    function renderSecurityFindings(events) {
+      const container=byId("security-findings");clear(container);
+      const findings=events.filter(event=>event.type==="security.finding.v1").map(event=>({event,finding:event.payload||{}}));
+      if(!findings.length){container.append(text("div","empty","No security findings are available. This is not a security clearance; enable security-posture and supply evidence."));return;}
+      findings.forEach(({event,finding})=>{
+        const card=text("article","metric-card","");
+        const head=text("div","metric-card-head","");
+        head.append(text("div","metric-name",finding.check||"Unnamed check"),text("span","state",finding.state||"UNKNOWN"));
+        card.append(head);
+        card.append(text("div","metric-detail",finding.explanation||finding.summary||"No explanation supplied."));
+        card.append(text("div","metric-detail","Source: "+(finding.source||"unknown")+" · Freshness: "+(finding.freshness||"unknown")+" · Observed: "+localTime(finding.observed_at)));
+        card.append(text("code","rule-id","Event_ID: "+(event.event_id||"unknown id")));
+        container.append(card);
       });
     }
     function renderRecommendation(recommendation, activity) {
@@ -799,7 +918,7 @@ const indexHTML = `<!doctype html>
       const ids = recommendation.evidence_event_ids || [];
       if (!ids.length) byId("recommendation-evidence").append(text("div","evidence-item","No supporting event references."));
       ids.forEach(id => {
-        const link = text("button","evidence-item evidence-link","↳ " + id);
+        const link = text("button","evidence-item evidence-link","↳ Event_ID: " + id);
         link.type = "button";
         link.addEventListener("click",() => {
           const target = document.querySelector('[data-event-id="' + id + '"]');
@@ -822,7 +941,7 @@ const indexHTML = `<!doctype html>
       events.slice().sort((left,right) => new Date(left.occurred_at) - new Date(right.occurred_at)).forEach(event => {
         const item = text("div","timeline-item","");
         item.dataset.eventId = event.event_id || "";
-        item.append(text("span","timeline-time",localTime(event.occurred_at)),text("strong","",names[event.type] || event.type),text("span","",(event.source || "unknown source") + (event.emitted_at && event.emitted_at !== event.occurred_at ? " · emitted " + localTime(event.emitted_at) : "")),text("code","",(event.event_id || "unknown id") + (event.derives_from && event.derives_from.length ? " · derives from " + event.derives_from.length + " event(s)" : "")));
+        item.append(text("span","timeline-time",localTime(event.occurred_at)),text("strong","",names[event.type] || event.type),text("span","",(event.source || "unknown source") + (event.emitted_at && event.emitted_at !== event.occurred_at ? " · emitted " + localTime(event.emitted_at) : "")),text("code","","Event_ID: " + (event.event_id || "unknown id") + (event.derives_from && event.derives_from.length ? " · derives from " + event.derives_from.length + " event(s)" : "")));
         byId("event-list").append(item);
       });
     }
@@ -833,9 +952,11 @@ const indexHTML = `<!doctype html>
       const badge = byId("mission-badge"); badge.textContent = status; badge.className = "badge " + stateClass(status);
       byId("scope").textContent = (mission.scope && mission.scope.type ? mission.scope.type : "mission") + " · " + (mission.scope && mission.scope.id ? mission.scope.id : data.host_id);
       byId("objective").textContent = mission.objective || "Mission objective unavailable";
-      byId("explanation").textContent = mission.explanation || "No explanation supplied.";
+      byId("mission-headline").textContent = missionHeadline(mission);
+      renderMissionFactors(mission);
       const metrics = runtime.metrics || {};
       renderConfiguration(data.configuration);
+      renderSimulationDefaults(data.configuration);
       clear(byId("stats"));
       byId("stats").append(
         stat("Mission status",status,mission.disposition || "No disposition"),
@@ -847,6 +968,7 @@ const indexHTML = `<!doctype html>
       renderCategories(data,mission,events);
       renderDiagnosis(mission);
       renderEngines(metrics);
+      renderSecurityFindings(events);
       renderRecommendation(data.recommendation || {},data.tool_activity || null);
       renderTimeline(events);
       const observations = events.filter(event => event.type === "observation.host.v1").map(event => ({event, value:event.payload || {}}));
@@ -859,11 +981,90 @@ const indexHTML = `<!doctype html>
         byId("observations").append(row);
       });
       byId("provenance").textContent = "Cycle " + (runtime.cycle_id || "unknown") + " · " + String(events.length) + " events · " + String(metrics.duration_millis || 0) + " ms";
-      byId("events").textContent = JSON.stringify(events.map(event => ({event_id:event.event_id,type:event.type,source:event.source,producer_version:event.producer_version,configuration_id:event.configuration_id,occurred_at:event.occurred_at,derives_from:event.derives_from || [],payload:event.payload})),null,2);
+      byId("events").textContent = JSON.stringify(events.map(event => ({Event_ID:"Event_ID: " + (event.event_id || "unknown id"),type:event.type,source:event.source,producer_version:event.producer_version,configuration_id:event.configuration_id,occurred_at:event.occurred_at,derives_from:(event.derives_from || []).map(id => "Event_ID: " + id),payload:event.payload})),null,2);
       byId("updated").textContent = "Report evaluated " + localTime(runtime.completed_at || mission.evaluated_at);
       byId("connection").textContent = "Live · refreshes every 3 seconds";
       byId("connection-dot").className = "dot";
     }
+    function missionHeadline(mission) {
+      switch(mission.status) {
+      case "GREEN": return "Required evidence is within configured criteria";
+      case "YELLOW": return "Elevated findings need attention";
+      case "RED": return "Critical findings require review";
+      default: return "Mission health cannot be confirmed";
+      }
+    }
+    function renderMissionFactors(mission) {
+      const list=byId("mission-factors");clear(list);
+      const factors=[];
+      (mission.components||[]).forEach(item=>{
+        if(item.state!=="HEALTHY")factors.push((item.component||"component")+" · "+(item.state||"UNKNOWN")+": "+(item.explanation||"No explanation supplied."));
+      });
+      (mission.security_findings||[]).forEach(item=>{
+        if(item.state!=="HEALTHY")factors.push("Security · "+(item.check||"check")+" · "+(item.state||"UNKNOWN")+": "+(item.explanation||"No explanation supplied."));
+      });
+      const missing=mission.coverage&&mission.coverage.missing_components||[];
+      missing.forEach(item=>factors.push("Missing required evidence · "+item));
+      if(!factors.length)factors.push(mission.status==="GREEN"?"No adverse contributors; required evidence is covered and within criteria.":"No adverse factor was isolated from the available evidence.");
+      factors.slice(0,6).forEach(factor=>list.append(text("li","",factor)));
+    }
+    function renderSimulationDefaults(configuration) {
+      if(!configuration||simulationDefaultsLoaded)return;
+      const thresholds=configuration.thresholds||{};
+      const values={cpu:thresholds.cpu_percent,memory:thresholds.memory_percent,filesystem:thresholds.filesystem_percent,load:thresholds.load_per_cpu};
+      Object.keys(values).forEach(key=>{
+        const item=values[key]||{};
+        byId("sim-"+key+"-warning").value=item.warning;
+        byId("sim-"+key+"-critical").value=item.critical;
+      });
+      simulationDefaultsLoaded=true;
+    }
+    function simulationInput() {
+      const number=id=>Number(byId(id).value);
+      return {
+        cpu_percent:number("sim-cpu"),memory_percent:number("sim-memory"),load_per_cpu:number("sim-load"),filesystem_percent:number("sim-filesystem"),
+        thresholds:{
+          cpu_percent:{warning:number("sim-cpu-warning"),critical:number("sim-cpu-critical")},
+          memory_percent:{warning:number("sim-memory-warning"),critical:number("sim-memory-critical")},
+          filesystem_percent:{warning:number("sim-filesystem-warning"),critical:number("sim-filesystem-critical")},
+          load_per_cpu:{warning:number("sim-load-warning"),critical:number("sim-load-critical")}
+        }
+      };
+    }
+    function renderSimulation(simulation) {
+      const incident=simulation.incident_report||{};
+      const cycle=simulation.report&&simulation.report.runtime||{};
+      const events=cycle.events||[];
+      byId("simulation-output").hidden=false;
+      byId("simulation-incident-title").textContent=(incident.title||"Synthetic incident report")+" · SIMULATED";
+      byId("simulation-incident-status").textContent="Incident_ID: "+(incident.id||cycle.cycle_id||"unknown")+" · Mission: "+(incident.status||"UNKNOWN")+" · Scenario: "+(simulation.label||simulation.scenario);
+      byId("simulation-incident-summary").textContent=incident.summary||"No incident summary supplied.";
+      [["simulation-factors",incident.contributing_factors],["simulation-missing",incident.missing_evidence],["simulation-recommendations",incident.recommendations]].forEach(([id,items])=>{
+        const list=byId(id);clear(list);
+        if(!items||!items.length){list.append(text("li","","None reported."));return;}
+        items.forEach(item=>list.append(text("li","",item)));
+      });
+      byId("simulation-event-meta").textContent="Synthetic cycle "+(cycle.cycle_id||"unknown")+" · "+events.length+" events · all events below are generated from synthetic input.";
+      const eventList=byId("simulation-events");clear(eventList);
+      if(!events.length)eventList.append(text("div","empty","No events were emitted."));
+      events.forEach(event=>{
+        const row=text("article","simulation-event","");
+        row.append(text("strong","",event.type||"unknown event"),text("span","",localTime(event.occurred_at)+" · "+(event.source||"unknown source")));
+        row.append(text("code","","Event_ID: "+(event.event_id||"unknown id")+(event.derives_from&&event.derives_from.length?" · derives from "+event.derives_from.map(id=>"Event_ID: "+id).join(", "):"")));
+        eventList.append(row);
+      });
+      byId("simulation-report").textContent=JSON.stringify(simulation,null,2);
+    }
+    byId("run-simulation").addEventListener("click",async()=>{
+      const button=byId("run-simulation");button.disabled=true;
+      const status=byId("simulation-status");status.textContent="Running an isolated synthetic cycle…";
+      try{
+        const response=await fetch("/api/simulate",{method:"POST",headers:{"Content-Type":"application/json","X-Requested-With":"PerceptronDashboard"},body:JSON.stringify({scenario:byId("simulation-scenario").value,inputs:simulationInput()}),cache:"no-store"});
+        if(!response.ok)throw new Error((await response.text())||"Simulation failed ("+response.status+")");
+        const result=await response.json();renderSimulation(result);status.textContent="Simulation complete · synthetic only · live report unchanged.";
+      }catch(error){status.textContent="Simulation failed: "+(error.message||"unknown error");}
+      finally{button.disabled=false;}
+    });
     byId("refresh-tool").addEventListener("click",async () => {
       const button = byId("refresh-tool");
       button.disabled = true;

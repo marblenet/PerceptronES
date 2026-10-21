@@ -128,6 +128,7 @@ Configuration files remain the authoritative local source until a persistent reg
 - Bound plugin runtime/output, adapter queues/retries, metric label cardinality, and request sizes.
 - Make input/export adapter failures, drops, lag, and backpressure visible.
 - Preserve mission unknown/coverage degradation when required source telemetry is absent or stale.
+- Treat security posture signals as future first-class operational evidence, with source, scope, freshness, coverage, and uncertainty preserved.
 
 ## 10. Acceptance criteria
 
@@ -140,6 +141,10 @@ Configuration files remain the authoritative local source until a persistent reg
 - At least one legacy source adapter and one destination adapter can be configured without changing core reasoning code.
 - Adapter failure, malformed input, stale data, authentication failure, and destination outage are visible and tested.
 - An exported mission/finding can be traced back to canonical events and sources.
+
+The v0.1 runtime now includes an optional bundled `security-posture` evidence assessor. Operators or upstream integrations supply normalized check, state, source, summary, and observation time through `security_evidence`, and declare the exact mission scope through `security_required_checks`; the engine emits provenance-linked findings and marks stale or future-dated evidence `UNKNOWN`. When enabled, every declared check requires a matching finding, so an unrelated finding cannot hide a coverage gap. Enabling the engine without declaring any required checks leaves a missing `security-scope` and prevents GREEN. Findings qualify mission status but remain distinct from host component health and are not action authority. This engine does not scan packages, query CVEs, validate certificates, or verify an asserted source. Automated collectors and domain-specific security checks remain future work. Findings must not be presented as comprehensive security assurance.
+
+The local dashboard also offers a separate Simulation page and bounded service with fixed synthetic scenarios for baseline, CPU pressure, missing/stale host evidence, and a critical security finding. Operators can vary synthetic measurements and thresholds. The page presents a generated incident summary, all cycle events, and the complete synthetic report. It runs only built-in engines, labels all results synthetic, and keeps them separate from the live report. This is not a general simulation/twin environment, production replay, or incident learning system.
 
 ## 11. Open decisions
 
