@@ -1,0 +1,158 @@
+# RFC-0012: Engine Store and Telemetry Interoperability
+
+**Status:** Proposed architecture update  
+**Category:** Core platform and integration  
+**Parent:** [Overall Architecture](01-overall-architecture.md)  
+**Related RFCs:** RFC-0001 Event Bus and Event Model; RFC-0002 Engine Runtime; RFC-0004 Confidence and Evidence; RFC-0007 Mission Assurance; RFC-0010 Policy Engine
+
+**Visual references:** [Legacy telemetry interoperability](diagrams/D-09-legacy-telemetry.md); [engine package, Store, and trust lifecycle](diagrams/D-12-engine-store.md); [system context and trust boundaries](diagrams/D-01-system-context.md).
+
+## 1. Summary
+
+This RFC proposes a consistent engine package/catalog model and a vendor-neutral path for augmenting legacy observability systems. The dashboard Store presents bundled, locally authored, and locally declared third-party engines; it does not itself install executable code from the internet. Engine configuration is grouped by owning engine. Each package declares category, contracts, version, settings, and action-policy metadata.
+
+The core accepts telemetry through versioned adapters, normalizes it into Perceptron events, runs configured reasoning engines, and exposes complete findings plus bounded metrics for downstream systems. This permits Perceptron SRE to consume existing signals and publish higher-level assessments back to an existing destination without making that vendor a core dependency.
+
+## 2. Goals
+
+- Treat each domain-specific engine, including first-party defaults, as a package with consistent metadata and lifecycle.
+- Keep event transport, mission aggregation, policy authority, and core APIs in the platform core rather than the domain-engine Store.
+- Support local engine development and operator-installed third-party engines through a common contract.
+- Make enablement, ordering, origin, version, settings, capabilities requested, and action-policy profile visible to operators.
+- Accept legacy telemetry through adapters that preserve source, scope, time, and provenance.
+- Export complete findings in a machine-readable form and expose safe, bounded metrics for systems such as Grafana.
+- Prevent policy metadata or a subprocess boundary from being represented as a security sandbox.
+
+## 3. Non-goals
+
+- Building a public package registry or automatic download/update service in the initial release.
+- Declaring a package trusted solely because it appears in a catalog.
+- Treating process isolation as privilege isolation.
+- Requiring Grafana, Prometheus, OpenTelemetry, or any vendor as a core runtime dependency.
+- Authorizing or executing production actions from an engine profile or confidence score.
+
+## 4. Conceptual architecture
+
+```text
+Legacy telemetry source(s)
+        │
+        ▼
+Versioned input adapter ──► Canonical Perceptron events
+                                  │
+                     ┌────────────┴────────────┐
+                     ▼                         ▼
+              Selected engines             Core services
+              (domain reasoning)        (bus, mission, policy)
+                     └────────────┬────────────┘
+                                  ▼
+                    Findings + provenance record
+                         │                 │
+                         ▼                 ▼
+                  Bulk JSON API       Metrics adapter
+                                            │
+                                  Existing telemetry system
+```
+
+Adapters are explicit boundaries. Input adapters translate external measurements/events into canonical observations with source identity, timestamps, entity scope, units, and availability. Output adapters project core findings into destination-specific formats and apply bounded cardinality, privacy, retry, and authentication rules. A cycle or finding is not silently dropped when an adapter fails; adapter health and delivery status must be observable.
+
+## 5. Engine package and Store
+
+### 5.1 Package contents
+
+A package under `main/external/<engine-name>` should include:
+
+- A manifest with stable name, semantic version, publisher/owner, category, role, description, protocol version, executable entrypoint, and supported platforms.
+- Versioned input/output event type and payload schemas.
+- Engine-owned settings schema and defaults.
+- Determinism/state declaration, resource and timeout limits, and health semantics.
+- Action-policy profile, read/write declaration, requested tools/scripts, and privilege/network/file requirements.
+- Provenance, licensing, dependency, upgrade, rollback, and compatibility information.
+- Conformance tests and a contribution guide.
+
+First-party defaults use the same catalog, configuration, and protocol contract. The core retains event routing, mission aggregation, policy authority, and dashboard/store services. This RFC does not require the immediate physical relocation of current in-process engine source code; migration is a separate implementation step.
+
+### 5.2 Operator Store behavior
+
+The Store has three conceptual sources:
+
+1. **Bundled:** first-party engines delivered with a Perceptron release.
+2. **Local:** engines authored or installed by the operator under the external package directory.
+3. **Published third party:** an engine package published by an external maintainer and installed locally after operator review.
+
+The Store shows source, publisher, version, enabled state, category, settings, declared contracts, requested capabilities, policy profile, trust/verification state, and compatibility. Install/upgrade is distinct from enablement. Discovery must not execute package code; install and enablement are separate operator actions. The initial dashboard can catalog bundled and locally declared engines but has no remote registry, signature verification, or automated installation.
+
+## 6. Action-policy metadata and enforcement
+
+Candidate policy profiles:
+
+- `reasoning_only`: analyze inputs and publish assessments/recommendations.
+- `human_escalation`: create an attributable handoff for human review.
+- `self_mitigation`: propose a bounded action for an independent policy evaluation.
+
+Every package also declares `read_only`, `allowed_tools`, and `allowed_scripts`. These are declarations for review and policy evaluation. They do not constrain arbitrary executable code. A process running under the Perceptron service identity can use any OS permission available to that identity unless an OS sandbox or broker enforces narrower access.
+
+The initial runtime remains observation/reasoning only. An engine cannot perform a tool call, run an arbitrary script, or make a production change by declaring a capability. Any future execution path must go through a core-owned broker and RFC-0010 policy authorization bound to the exact tool, arguments, target, scope, identity, evidence, policy version, and expiration. Missing enforcement means the capability remains unavailable.
+
+## 7. Legacy telemetry interoperability
+
+### 7.1 Input path
+
+An input adapter maps a source contract into canonical events. Each measurement should preserve source and producer version, observation and receipt time, entity and tenant scope where applicable, unit, quality/availability, and source-specific provenance. Adapter configuration must define mapping, authentication, buffering, retry, rate limits, stale data behavior, and error reporting. Unknown or malformed values remain explicit failures/unknown evidence; they are not defaulted to healthy or zero.
+
+Initial adapters should remain narrowly scoped and operator-configured. Candidate sources include Prometheus-compatible query/scrape, OpenTelemetry metrics/events, files/streams, and application-specific APIs. The first release does not select a universal input transport or promise that all source formats are supported.
+
+### 7.2 Output path
+
+The core exposes:
+
+- A versioned bulk report/API containing the complete current-cycle findings and provenance.
+- A bounded metrics projection for common numeric observations, component/mission states, engine status, and cycle health.
+- Optional destination-specific exporters, each with explicit authentication, retry, buffering, and delivery semantics.
+
+Prometheus exposition is suitable for a Prometheus-compatible scraper, including Grafana-managed collection. Metric labels must avoid unbounded values such as raw explanations, event IDs, customer identifiers, and arbitrary payload content. Detailed findings remain in the bulk report/event interface. A scrape endpoint is not the same as a remote-write exporter.
+
+Perceptron should enrich, not seize ownership of, the legacy destination: operators can route the derived metrics to the same monitoring backend already in use. Alert routing and paging remain the responsibility of the configured monitoring/incident-management system unless a separately accepted integration contract assigns that responsibility to Perceptron.
+
+## 8. Configuration and dashboard
+
+The dashboard separates Operations from the Engine Store. Operations presents mission and evidence. Configuration groups global collectors/runtime options separately from each engine's own settings. The Store supports inspection and enable/disable of installed, compatible engines and links contributors to package requirements.
+
+Configuration files remain the authoritative local source until a persistent registry contract is accepted. Updates are validated before atomic persistence and applied on a subsequent cycle. Invalid edits retain last-known-good configuration and emit a diagnostic. Package binary/manifest changes are administrator-controlled and are not performed by dashboard settings updates.
+
+## 9. Security, privacy, and availability
+
+- Treat third-party and locally authored executables as untrusted until reviewed; process execution is not sandboxing.
+- Run under a dedicated least-privilege identity; do not expose dashboard or ingestion endpoints publicly without authentication and authorization.
+- Do not pass service credentials or secrets to engines unless a separately enforced, scoped capability explicitly requires them.
+- Apply privacy classification and redaction to both input telemetry and exported findings.
+- Bound plugin runtime/output, adapter queues/retries, metric label cardinality, and request sizes.
+- Make input/export adapter failures, drops, lag, and backpressure visible.
+- Preserve mission unknown/coverage degradation when required source telemetry is absent or stale.
+
+## 10. Acceptance criteria
+
+- Bundled and external engines have a common versioned package contract and visible catalog state.
+- Configuration is grouped by core and engine ownership and rejects invalid settings explicitly.
+- Store discovery is separate from package installation and execution.
+- Policy declarations cannot themselves grant access or authorize actions.
+- The complete current-cycle finding set is available in a machine-readable export.
+- Metrics export preserves unknown/unavailable states and has documented cardinality bounds.
+- At least one legacy source adapter and one destination adapter can be configured without changing core reasoning code.
+- Adapter failure, malformed input, stale data, authentication failure, and destination outage are visible and tested.
+- An exported mission/finding can be traced back to canonical events and sources.
+
+## 11. Open decisions
+
+1. What manifest and settings-schema formats and compatibility rules are normative?
+2. What package publisher identity, signature, provenance, review, and update process governs third-party engines?
+3. What process sandbox and capability broker are supported on each target OS?
+4. Which input adapter and source contract should be implemented first for legacy-system integration?
+5. Which output adapters are required beyond the initial Prometheus scrape and JSON bulk report?
+6. What authentication, delivery, retry, buffering, and data-retention guarantees apply to each adapter?
+7. Which stable metric names/labels and cardinality limits are approved for platform and domain findings?
+8. How are customer/tenant identifiers and sensitive payload fields redacted or aggregated?
+9. What incident/paging destination, if any, should Perceptron integrate directly rather than through the existing metrics system?
+
+## 12. Dependencies
+
+RFC-0001 supplies canonical events and provenance. RFC-0002 defines engine packaging, runtime, catalog, and capabilities. RFC-0004 governs evidence quality and confidence. RFC-0007 defines mission outputs. RFC-0010 governs any action proposal or execution capability. Security, privacy, and deployment requirements must be accepted before remote adapters or production actions are enabled.

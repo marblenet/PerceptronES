@@ -1,0 +1,8 @@
+# Local runtime configuration and generated binaries.
+/main/perceptron.json
+/main/perceptron.exe
+/main/perceptron-linux-amd64
+
+# Go build/test output.
+*.test
+coverage.out
