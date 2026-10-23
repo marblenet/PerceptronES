@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const EventSchemaVersion = "v1"
+const EventSchemaVersion = "v2"
 const CoreVersion = "0.1.0"
 
 const (
@@ -17,6 +17,10 @@ const (
 	ReasoningCalculated = "calculated"
 	SafetyInformational = "informational"
 	SafetyReasoning     = "reasoning"
+	OriginLive          = "live"
+	OriginSimulation    = "simulation"
+	OriginReplay        = "replay"
+	OriginHumanAction   = "human_action"
 )
 
 type EntityRef struct {
@@ -39,6 +43,7 @@ type Event struct {
 	ConfigurationID string          `json:"configuration_id,omitempty"`
 	Type            string          `json:"type"`
 	SchemaVersion   string          `json:"schema_version"`
+	Origin          string          `json:"origin"`
 	OccurredAt      time.Time       `json:"occurred_at"`
 	EmittedAt       time.Time       `json:"emitted_at"`
 	EntityRefs      []EntityRef     `json:"entity_refs"`
@@ -56,6 +61,10 @@ func NewEventAt(now time.Time, correlationID, source, eventType string, entityRe
 }
 
 func NewEventWithTimes(occurredAt, emittedAt time.Time, correlationID, source, eventType string, entityRefs []EntityRef, derivesFrom []string, reasoningKind, safetyClass string, payload interface{}) (Event, error) {
+	return NewEventWithTimesAndOrigin(OriginLive, occurredAt, emittedAt, correlationID, source, eventType, entityRefs, derivesFrom, reasoningKind, safetyClass, payload)
+}
+
+func NewEventWithTimesAndOrigin(origin string, occurredAt, emittedAt time.Time, correlationID, source, eventType string, entityRefs []EntityRef, derivesFrom []string, reasoningKind, safetyClass string, payload interface{}) (Event, error) {
 	id, err := NewID()
 	if err != nil {
 		return Event{}, fmt.Errorf("generate event ID: %w", err)
@@ -70,6 +79,7 @@ func NewEventWithTimes(occurredAt, emittedAt time.Time, correlationID, source, e
 		Source:        source,
 		Type:          eventType,
 		SchemaVersion: EventSchemaVersion,
+		Origin:        origin,
 		OccurredAt:    occurredAt.UTC(),
 		EmittedAt:     emittedAt.UTC(),
 		EntityRefs:    append([]EntityRef(nil), entityRefs...),
@@ -104,6 +114,11 @@ func (event Event) Validate() error {
 	}
 	if event.SchemaVersion != EventSchemaVersion {
 		return fmt.Errorf("unsupported event schema version %q", event.SchemaVersion)
+	}
+	switch event.Origin {
+	case OriginLive, OriginSimulation, OriginReplay, OriginHumanAction:
+	default:
+		return fmt.Errorf("unsupported or missing event origin %q", event.Origin)
 	}
 	if event.ProducerVersion != "" && strings.TrimSpace(event.ProducerVersion) == "" {
 		return errors.New("producer_version must not be blank")

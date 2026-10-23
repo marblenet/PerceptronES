@@ -101,8 +101,17 @@ func NewRuntime(cfg config.Config) (*Runtime, error) {
 }
 
 func (runtime *Runtime) Run(ctx context.Context, cycleID string, observations []model.Observation) (CycleResult, error) {
+	return runtime.RunWithOrigin(ctx, cycleID, observations, model.OriginLive)
+}
+
+func (runtime *Runtime) RunWithOrigin(ctx context.Context, cycleID string, observations []model.Observation, origin string) (CycleResult, error) {
 	if strings.TrimSpace(cycleID) == "" {
 		return CycleResult{}, errors.New("cycle ID must not be empty")
+	}
+	switch origin {
+	case model.OriginLive, model.OriginSimulation, model.OriginReplay, model.OriginHumanAction:
+	default:
+		return CycleResult{}, fmt.Errorf("unsupported runtime event origin %q", origin)
 	}
 	startedAt := time.Now().UTC()
 	eventBus := bus.New()
@@ -110,6 +119,10 @@ func (runtime *Runtime) Run(ctx context.Context, cycleID string, observations []
 	cycleEvent, err := model.NewEvent(cycleID, "perceptron-runtime", model.TypeCycle, []model.EntityRef{{Type: "host", ID: runtime.config.HostID}}, nil, model.ReasoningCalculated, model.SafetyInformational, model.CycleContext{HostID: runtime.config.HostID})
 	if err != nil {
 		return CycleResult{}, fmt.Errorf("create assessment cycle event: %w", err)
+	}
+	cycleEvent.Origin = origin
+	if err := cycleEvent.Validate(); err != nil {
+		return CycleResult{}, fmt.Errorf("validate assessment cycle event: %w", err)
 	}
 	cycleEvent.ProducerVersion = model.CoreVersion
 	cycleEvent.ConfigurationID = runtime.configurationID
@@ -131,6 +144,10 @@ func (runtime *Runtime) Run(ctx context.Context, cycleID string, observations []
 		event, err := model.NewEventWithTimes(observation.ObservedAt, time.Now().UTC(), cycleID, "host-observer", model.TypeObservation, entityRefs, nil, model.ReasoningObserved, model.SafetyInformational, observation)
 		if err != nil {
 			return CycleResult{}, fmt.Errorf("create observation event %d: %w", i, err)
+		}
+		event.Origin = origin
+		if err := event.Validate(); err != nil {
+			return CycleResult{}, fmt.Errorf("validate observation event %d: %w", i, err)
 		}
 		event.ProducerVersion = model.CoreVersion
 		event.ConfigurationID = runtime.configurationID
@@ -156,6 +173,10 @@ func (runtime *Runtime) Run(ctx context.Context, cycleID string, observations []
 		if err != nil {
 			return CycleResult{}, fmt.Errorf("create security evidence event %d: %w", i, err)
 		}
+		event.Origin = origin
+		if err := event.Validate(); err != nil {
+			return CycleResult{}, fmt.Errorf("validate security evidence event %d: %w", i, err)
+		}
 		event.ProducerVersion = model.CoreVersion
 		event.ConfigurationID = runtime.configurationID
 		if err := eventBus.Publish(ctx, event); err != nil {
@@ -180,6 +201,11 @@ func (runtime *Runtime) Run(ctx context.Context, cycleID string, observations []
 			return CycleResult{}, fmt.Errorf("engine %s failed: %w", current.Name(), err)
 		}
 		for outputIndex, output := range outputs {
+			if err := inheritOrigin(inputs, &output); err != nil {
+				engineMetrics.Failures++
+				metrics.Engines[current.Name()] = engineMetrics
+				return CycleResult{}, fmt.Errorf("engine %s output %d origin rejected: %w", current.Name(), outputIndex, err)
+			}
 			if err := validateOutput(current, cycleID, runtime.configurationID, inputs, output); err != nil {
 				engineMetrics.Failures++
 				metrics.Engines[current.Name()] = engineMetrics
@@ -210,6 +236,11 @@ func (runtime *Runtime) Run(ctx context.Context, cycleID string, observations []
 		return CycleResult{}, fmt.Errorf("core mission assessment failed: %w", err)
 	}
 	for outputIndex, output := range missionOutputs {
+		if err := inheritOrigin(coreInputs, &output); err != nil {
+			coreMetrics.Failures++
+			metrics.CoreServices[mission.Name()] = coreMetrics
+			return CycleResult{}, fmt.Errorf("core mission output %d origin rejected: %w", outputIndex, err)
+		}
 		if err := validateOutput(mission, cycleID, runtime.configurationID, coreInputs, output); err != nil {
 			coreMetrics.Failures++
 			metrics.CoreServices[mission.Name()] = coreMetrics
@@ -316,12 +347,21 @@ func validateOutput(current Engine, cycleID, configurationID string, inputs []mo
 	if output.CorrelationID != cycleID {
 		return errors.New("output correlation ID does not match the active cycle")
 	}
+	for _, input := range inputs {
+		if output.Origin != input.Origin {
+			return errors.New("output origin must match its source events")
+		}
+	}
 
 	if !contains(current.Produces(), output.Type) {
 		return fmt.Errorf("undeclared output event type %q", output.Type)
 	}
-	if output.Classification.ReasoningKind != model.ReasoningCalculated {
-		return errors.New("engine assessments must be classified as calculated")
+	expectedReasoning := model.ReasoningCalculated
+	if categoryEngine, ok := current.(interface{ Category() string }); ok && categoryEngine.Category() == "tap" {
+		expectedReasoning = model.ReasoningObserved
+	}
+	if output.Classification.ReasoningKind != expectedReasoning {
+		return fmt.Errorf("engine output must be classified as %s", expectedReasoning)
 	}
 	inputIDs := make(map[string]bool, len(inputs))
 	inputEntities := make(map[model.EntityRef]bool)
@@ -347,6 +387,20 @@ func validateOutput(current Engine, cycleID, configurationID string, inputs []mo
 	if output.CausationID != "" && !inputIDs[output.CausationID] {
 		return fmt.Errorf("causation reference %q is not an input to this engine invocation", output.CausationID)
 	}
+	return nil
+}
+
+func inheritOrigin(inputs []model.Event, output *model.Event) error {
+	if len(inputs) == 0 {
+		return errors.New("derived output has no source events")
+	}
+	origin := inputs[0].Origin
+	for _, input := range inputs[1:] {
+		if input.Origin != origin {
+			return errors.New("cannot derive a single-origin event from mixed-origin inputs")
+		}
+	}
+	output.Origin = origin
 	return nil
 }
 

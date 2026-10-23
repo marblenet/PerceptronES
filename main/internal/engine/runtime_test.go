@@ -198,6 +198,65 @@ func TestEnabledSecurityPostureWithoutEvidencePreventsGreen(t *testing.T) {
 	}
 }
 
+func TestRuntimePropagatesNonLiveOriginToDerivedEvents(t *testing.T) {
+	runtime, err := NewRuntime(config.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runtime.RunWithOrigin(context.Background(), "cycle-simulation-origin", healthyObservations(), model.OriginSimulation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Events) == 0 {
+		t.Fatal("expected cycle events")
+	}
+	for _, event := range result.Events {
+		if event.Origin != model.OriginSimulation {
+			t.Errorf("event %s lost simulation origin: %q", event.ID, event.Origin)
+		}
+	}
+	if _, err := runtime.RunWithOrigin(context.Background(), "cycle-invalid-origin", nil, "unknown"); err == nil {
+		t.Fatal("unsupported origin must be rejected")
+	}
+}
+
+func TestTapEngineMayPublishObservedFactsOnly(t *testing.T) {
+	input, err := model.NewEvent("cycle-tap", "runtime", model.TypeCycle,
+		[]model.EntityRef{{Type: "host", ID: "host-a"}}, nil, model.ReasoningCalculated,
+		model.SafetyInformational, map[string]string{"host_id": "host-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := model.NewEvent("cycle-tap", "sample-tap", "sample.observation.v1",
+		input.EntityRefs, []string{input.ID}, model.ReasoningObserved, model.SafetyInformational,
+		map[string]string{"domain": "weather.sleet"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output.ProducerVersion = "1.0"
+	output.ConfigurationID = "config-id"
+	tap := testTapEngine{}
+	if err := validateOutput(tap, "cycle-tap", "config-id", []model.Event{input}, output); err != nil {
+		t.Fatalf("tap's observed fact was rejected: %v", err)
+	}
+	output.Classification.ReasoningKind = model.ReasoningCalculated
+	if err := validateOutput(tap, "cycle-tap", "config-id", []model.Event{input}, output); err == nil {
+		t.Fatal("tap must not publish an interpreted assessment")
+	}
+}
+
+type testTapEngine struct{}
+
+func (testTapEngine) Name() string       { return "sample-tap" }
+func (testTapEngine) Version() string    { return "1.0" }
+func (testTapEngine) Role() string       { return "observation" }
+func (testTapEngine) Category() string   { return "tap" }
+func (testTapEngine) Consumes() []string { return []string{model.TypeCycle} }
+func (testTapEngine) Produces() []string { return []string{"sample.observation.v1"} }
+func (testTapEngine) Process(context.Context, []model.Event) ([]model.Event, error) {
+	return nil, nil
+}
+
 func TestSecurityCoverageRequiresExactConfiguredChecks(t *testing.T) {
 	cfg := config.Default()
 	cfg.Engines = append(cfg.Engines, "security-posture")

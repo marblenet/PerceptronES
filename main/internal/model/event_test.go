@@ -68,3 +68,19 @@ func TestEventSeparatesOccurrenceAndEmissionTimes(t *testing.T) {
 		t.Fatalf("event occurrence and emission timestamps were conflated: %#v", event)
 	}
 }
+
+func TestEventOriginIsRequiredAndVersioned(t *testing.T) {
+	event, err := NewEventWithTimesAndOrigin(OriginSimulation, time.Now().UTC(), time.Now().UTC(),
+		"cycle-sim", "simulator", TypeObservation, []EntityRef{{Type: "host", ID: "host-1"}},
+		nil, ReasoningObserved, SafetyInformational, map[string]string{"metric": "cpu"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Origin != OriginSimulation || event.SchemaVersion != EventSchemaVersion {
+		t.Fatalf("event origin/schema was not recorded: %#v", event)
+	}
+	event.Origin = ""
+	if err := event.Validate(); err == nil {
+		t.Fatal("missing event origin must be rejected")
+	}
+}

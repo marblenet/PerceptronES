@@ -50,16 +50,17 @@ This does not mean every low-level runtime operation must be represented as a bu
 3. **Provenance:** events identify their source and preserve links to causal inputs where available.
 4. **Decoupling:** producers publish events; consumers subscribe through platform contracts rather than calling other engines directly.
 5. **Explicit versioning:** event type and schema version must be identifiable.
-6. **Replay safety:** replay must not be confused with a new live occurrence; consumers need enough context to avoid unintended duplicate side effects.
-7. **No success-shaped missing data:** invalid, unavailable, or incomplete event inputs must not be silently interpreted as healthy state.
-8. **Producer-owned creation:** the producer is responsible for creating and identifying an event. Consumers may interpret it and publish new derived events, but do not mutate the original event.
-9. **Evidence lineage:** a derived event must be able to reference the observations, evidence, or prior events from which it was derived, where applicable.
-10. **Separate relationship semantics:** correlation, causation, and derivation are distinct relationships and must not be represented by one ambiguous identifier.
-11. **Safety-class awareness:** event replay, routing, and authorization behavior consider the event's safety class; severity is a separate property.
-12. **Facts and conclusions are distinct:** observations report what a source measured or asserted; derived events report an interpretation, calculation, or prediction based on inputs.
-13. **Events carry claims, not universal truth:** an event records what a source claims or observed within its scope. Conflicting claims from different sources may coexist; authority and reconciliation are defined by domain contracts.
-14. **Freshness is explicit where relevant:** event age and applicability affect whether a value is useful for a current decision. Freshness is not the same as source trust or confidence.
-15. **Human-originated decisions are representable:** human validation, approval, escalation, and override can be recorded as attributable events with appropriate authorization context.
+6. **Explicit origin:** events identify whether they are live, simulated, replayed, or human-action records; derived events preserve their input origin.
+7. **Replay safety:** replay must not be confused with a new live occurrence; consumers need enough context to avoid unintended duplicate side effects.
+8. **No success-shaped missing data:** invalid, unavailable, or incomplete event inputs must not be silently interpreted as healthy state.
+9. **Producer-owned creation:** the producer is responsible for creating and identifying an event. Consumers may interpret it and publish new derived events, but do not mutate the original event.
+10. **Evidence lineage:** a derived event must be able to reference the observations, evidence, or prior events from which it was derived, where applicable.
+11. **Separate relationship semantics:** correlation, causation, and derivation are distinct relationships and must not be represented by one ambiguous identifier.
+12. **Safety-class awareness:** event replay, routing, and authorization behavior consider the event's safety class; severity is a separate property.
+13. **Facts and conclusions are distinct:** observations report what a source measured or asserted; derived events report an interpretation, calculation, or prediction based on inputs.
+14. **Events carry claims, not universal truth:** an event records what a source claims or observed within its scope. Conflicting claims from different sources may coexist; authority and reconciliation are defined by domain contracts.
+15. **Freshness is explicit where relevant:** event age and applicability affect whether a value is useful for a current decision. Freshness is not the same as source trust or confidence.
+16. **Human-originated decisions are representable:** human validation, approval, escalation, and override can be recorded as attributable events with appropriate authorization context.
 
 These are proposed contract principles. Their exact enforcement varies with the selected transport and runtime.
 
@@ -77,6 +78,7 @@ The following fields are candidates drawn from project context and feedback, not
   "source": "producer identity",
   "type": "dns.propagation.observed",
   "schema_version": "version identifier",
+  "origin": "live | simulation | replay | human_action",
   "occurred_at": "source observation time",
   "emitted_at": "event publication time",
   "locality": {
@@ -97,7 +99,7 @@ The following fields are candidates drawn from project context and feedback, not
 }
 ```
 
-The example separates event identity, workflow correlation, and direct causation. `derives_from` is a candidate explicit relationship for one or more events/evidence items that contributed to a derived result; it is distinct from direct causation. It also separates reasoning kind from safety class. The exact nesting and names are illustrative.
+The example separates event identity, workflow correlation, and direct causation. `derives_from` is a candidate explicit relationship for one or more events/evidence items that contributed to a derived result; it is distinct from direct causation. `origin` distinguishes live evidence from simulation, replay, and human-action records and must propagate to derived events; mixed-origin inputs require an explicit future contract rather than an implicit conversion. It also separates reasoning kind from safety class. The exact nesting and names are illustrative.
 
 The example separates occurrence time from publication time to avoid conflating source time with bus arrival time. This is a candidate distinction, not a settled clock model. Regional locality distinguishes where an observation occurred, where a result was derived, and which region it assesses; these locations can differ. `freshness` is contextual and does not imply a universal time-to-live. `confidence` is an illustrative placeholder for an optional, claim-specific confidence value or domain model pending RFC-0004 and ARCH-014/ARCH-021; policy context must not be encoded as factual evidence. A source trust measure, if represented, is distinct from confidence in the event's conclusion.
 

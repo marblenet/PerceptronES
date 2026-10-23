@@ -1,4 +1,4 @@
-# Perceptron SRE Engine Plugin Protocol v1
+# Perceptron SRE Engine Plugin Protocol v2
 
 The core uses an ordered engine pipeline. Built-in and external engines share the same declared event contract; An external engine is a separate executable and can be implemented in any language that reads and writes JSON. Bundled engines currently remain in-process; migrating them to this same package boundary is planned work.
 
@@ -58,9 +58,10 @@ Request shape:
 
 ```json
 {
-  "protocol_version": "perceptron-engine-v1",
+  "protocol_version": "perceptron-engine-v2",
   "name": "example-enrichment",
   "version": "1.0.0",
+  "category": "host health",
   "role": "enrichment",
   "cycle_id": "cycle-uuid",
   "configuration_id": "sha256-hex",
@@ -71,7 +72,8 @@ Request shape:
       "correlation_id": "cycle-uuid",
       "source": "host-observer",
       "type": "observation.host.v1",
-      "schema_version": "v1",
+      "schema_version": "v2",
+      "origin": "live",
       "occurred_at": "2026-10-20T12:00:00Z",
       "emitted_at": "2026-10-20T12:00:00Z",
       "entity_refs": [{"type": "host", "id": "host-a"}],
@@ -86,7 +88,7 @@ Response shape:
 
 ```json
 {
-  "protocol_version": "perceptron-engine-v1",
+  "protocol_version": "perceptron-engine-v2",
   "outputs": [
     {
       "event_id": "new-unique-event-uuid",
@@ -97,7 +99,8 @@ Response shape:
       "producer_version": "1.0.0",
       "configuration_id": "sha256-hex",
       "type": "example.enrichment.v1",
-      "schema_version": "v1",
+      "schema_version": "v2",
+      "origin": "live",
       "occurred_at": "2026-10-20T12:00:00Z",
       "emitted_at": "2026-10-20T12:00:01Z",
       "entity_refs": [{"type": "host", "id": "host-a"}],
@@ -108,7 +111,9 @@ Response shape:
 }
 ```
 
-An engine error may be returned as `{"protocol_version":"perceptron-engine-v1","error":"description"}`. A failing process, timeout, malformed response, or invalid event fails the assessment cycle explicitly.
+An engine error may be returned as `{"protocol_version":"perceptron-engine-v2","error":"description"}`. A failing process, timeout, malformed response, or invalid event fails the assessment cycle explicitly.
+
+The event `origin` is required and must be one of `live`, `simulation`, `replay`, or `human_action`. Derived outputs must preserve the origin of their inputs; mixed-origin inputs cannot be combined into a single-origin output. Engines in category `tap` publish observed facts (`reasoning_kind: observed`) and must not publish interpreted assessments.
 
 ## Core validation and operational limits
 

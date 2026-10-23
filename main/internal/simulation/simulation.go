@@ -138,7 +138,7 @@ func RunScenarioWithInputs(ctx context.Context, cfg config.Config, name string, 
 		return Result{}, fmt.Errorf("create simulation cycle ID: %w", err)
 	}
 	cycleID := "simulation-" + id
-	cycle, err := runtime.Run(ctx, cycleID, observations)
+	cycle, err := runtime.RunWithOrigin(ctx, cycleID, observations, model.OriginSimulation)
 	if err != nil {
 		return Result{}, fmt.Errorf("run synthetic scenario %q: %w", name, err)
 	}

@@ -63,7 +63,15 @@ func TestDashboardServesPageAndLatestReport(t *testing.T) {
 		!strings.Contains(pageHTML, "Root-cause assessment") ||
 		!strings.Contains(pageHTML, "Component health by category") ||
 		!strings.Contains(pageHTML, "Application logs") ||
-		!strings.Contains(pageHTML, "Event timeline and provenance") ||
+		!strings.Contains(pageHTML, "Event timeline &amp; provenance") ||
+		!strings.Contains(pageHTML, "newest on left") ||
+		!strings.Contains(pageHTML, "event-node") ||
+		!strings.Contains(pageHTML, "settings-tab") ||
+		!strings.Contains(pageHTML, "security-tab") ||
+		!strings.Contains(pageHTML, "security-page") ||
+		!strings.Contains(pageHTML, "The Alert Window") ||
+		!strings.Contains(pageHTML, "Suggested Mitigation Window") ||
+		!strings.Contains(pageHTML, "Reasoning engines") ||
 		!strings.Contains(pageHTML, "Runtime configuration") ||
 		!strings.Contains(pageHTML, "Engine Store") ||
 		!strings.Contains(pageHTML, "Available core capabilities") ||
@@ -95,10 +103,13 @@ func TestDashboardServesPageAndLatestReport(t *testing.T) {
 		!strings.Contains(pageHTML, "Event_ID:\"Event_ID: \"") ||
 		!strings.Contains(pageHTML, "(event.derives_from || []).map(id => \"Event_ID: \" + id)") ||
 		!strings.Contains(pageHTML, "textContent") ||
-		!strings.Contains(pageHTML, "does not retain the 60 seconds before an incident") {
+		!strings.Contains(pageHTML, "does not retain the 60 seconds before an incident") ||
+		!strings.Contains(pageHTML, "--bg:#080b09") ||
+		!strings.Contains(pageHTML, "--green:#83c987") ||
+		!strings.Contains(pageHTML, ".hero,.recommendation{background:linear-gradient(120deg,#172019,#101510 75%)") {
 		t.Fatal("dashboard page is missing pyramid levels, available security/simulation capabilities, philosophy guardrails, labeled event IDs, refresh control, safety semantics, or safe text insertion")
 	}
-	levels := []string{"Mission decision", "Root-cause assessment", "Reasoning engines", "Components", "Source evidence and event record"}
+	levels := []string{"Event timeline", "The Alert Window", "Root-cause assessment", "Component health by category", "Metrics and observations"}
 	lastIndex := -1
 	for _, level := range levels {
 		index := strings.Index(pageHTML, level)

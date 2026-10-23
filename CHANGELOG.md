@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-10-23
+
+### Dashboard appearance
+
+- Corrected the dashboard palette in the PerceptronES application source: charcoal/black surfaces with green terminal-style accents replace the blue theme.
+- Added a dashboard regression assertion for the embedded palette so future builds serve the intended colors.
+- Reworked Operations with an event timeline at the top (newest on the left), expandable event payloads and provenance, and a top-right configuration gear.
+- Added expandable reasoning-engine availability and a compact security status to the mission summary; moved detailed security findings to a dedicated Security page, separate from live alerting.
+- Renamed the mission and recommendation panels “The Alert Window” and “Suggested Mitigation Window”; retained the separate Simulation page and labeled event identifiers as `Event_ID: <event_id>`.
+
+### Engineering memo and platform contracts
+
+- Applied the Perceptron SRE engineering philosophy and today's engine-platform addendum to the PerceptronES design knowledge base; documented tap-engine boundaries, contributor proof contracts, extensible domains, simulation/dry-run distinctions, human-action safeguards, and staged adoption.
+- Added versioned event origins (`live`, `simulation`, `replay`, `human_action`) and propagate origins through engine and mission outputs; isolated simulation results are now explicitly marked `simulation`.
+- Enforced observation-only output classification for tap-category plugins, upgraded the external engine protocol and event envelope to v2, and documented the compatibility contract.
+- Added tests for required event origin, origin propagation, simulation labeling, and tap-engine output boundaries.
+
 ## 2026-10-21
 
 ### Mission assessment and dashboard

@@ -14,7 +14,7 @@ import (
 	"perceptronsre/internal/model"
 )
 
-const PluginProtocolVersion = "perceptron-engine-v1"
+const PluginProtocolVersion = "perceptron-engine-v2"
 
 const (
 	pluginOutputLimit = 8 * 1024 * 1024
@@ -51,9 +51,10 @@ func newProcessEngine(plugin config.Plugin) (*processEngine, error) {
 	return &processEngine{plugin: plugin, timeout: timeout}, nil
 }
 
-func (engine *processEngine) Name() string    { return engine.plugin.Name }
-func (engine *processEngine) Version() string { return engine.plugin.Version }
-func (engine *processEngine) Role() string    { return engine.plugin.Role }
+func (engine *processEngine) Name() string     { return engine.plugin.Name }
+func (engine *processEngine) Version() string  { return engine.plugin.Version }
+func (engine *processEngine) Category() string { return engine.plugin.Category }
+func (engine *processEngine) Role() string     { return engine.plugin.Role }
 func (engine *processEngine) Consumes() []string {
 	return append([]string(nil), engine.plugin.Consumes...)
 }

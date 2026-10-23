@@ -598,25 +598,60 @@ const indexHTML = `<!doctype html>
     @media(max-width:900px){.simulation-inputs{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:540px){.simulation-inputs{grid-template-columns:1fr}}
     .planned-card{border-style:dashed;opacity:.86}.planned-status{display:inline-block;margin:9px 0 2px;padding:4px 8px;border:1px solid #f3bd6266;border-radius:999px;color:var(--amber);font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
     @media(max-width:540px){.store-grid{grid-template-columns:1fr}}
+    :root{--bg:#080b09;--panel:#101512;--panel2:#151c17;--line:#29342c;--text:#dce9dc;--muted:#91a192;--cyan:#8fca91;--blue:#8fca91;--green:#83c987;--shadow:0 18px 55px #0009}
+    body{background:radial-gradient(ellipse at 85% -15%,#1a281c 0,transparent 38%),var(--bg)}
+    .mark{border-color:#83c98766;background:#83c98712;color:var(--green)}
+    .hero,.recommendation{background:linear-gradient(120deg,#172019,#101510 75%);border-color:#344336}
+    .recommendation{background:linear-gradient(120deg,#192219,#101510);border-color:#405342}
+    .section,.stat,.category,.side-card,.component,.metric-card,.engine-chip,.store-card,.simulation-event{background:#111612}
+    .component,.metric-card,.engine-chip,.store-card,.simulation-event{background:#0b100c}
+    .category{background:#111612}
+    .page-nav button{background:#101510;color:var(--text)}
+    .page-nav button[aria-current=page]{border-color:#83c987;color:#a5dbaa;background:#83c98714}
+    .action-btn{border-color:#83c98788;background:#83c98718;color:#c8e9c9}
+    .action-btn:hover:not(:disabled){background:#83c98730}
+    .gear-btn{background:#101510;color:var(--green)}
+    .config-grid input,.config-grid textarea,.config-thresholds input,.plugin-setting textarea,.simulation-inputs input{border-color:#344336;background:#0b100c}
+    .engine-move{background:#101510}
+    .tier-number{border-color:#405342;color:var(--green)}
+    .timeline-item:before{background:var(--green)}
+    .timeline-item.evidence-highlight{background:#83c98714;outline-color:#83c98766}
+    .event-rail{border-color:var(--line)}
+    .event-node{border-color:var(--line);border-top-color:var(--green);background:#0e130f}
+    .event-node summary:before{color:var(--green)}
+    .event-node time,.event-node code,.rule-id{color:var(--green)}
+    .stat-link:focus-visible,.gear-btn:focus-visible,.page-nav button:focus-visible{outline-color:var(--green)}
+    .simulation-report{background:#0b100c;color:var(--text)}
+    .mission-facts{grid-template-columns:repeat(6,minmax(0,1fr));max-width:none}.mission-facts .stat-value{font-size:14px}
+    .event-rail{display:flex;gap:10px;overflow-x:auto;padding:3px 2px 12px;border-left:1px solid var(--line);border-right:1px solid var(--line);scroll-snap-type:x mandatory}
+    .event-node{flex:0 0 260px;scroll-snap-align:start;border:1px solid var(--line);border-top:2px solid var(--green);border-radius:10px;background:#0e130f;padding:11px}
+    .event-node summary{display:grid;gap:5px;list-style:none}.event-node summary::-webkit-details-marker{display:none}.event-node summary:before{content:"›";color:var(--green);float:right}.event-node[open] summary:before{content:"⌄"}
+    .event-node time,.event-node code{font:10px ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--muted)}.event-node strong{color:var(--text);font-size:12px}.event-node pre{max-height:260px}
+    .top-actions{display:flex;align-items:center;gap:12px}.gear-btn{width:40px;height:40px;border:1px solid var(--line);border-radius:12px;background:#101510;color:var(--green);font-size:20px;cursor:pointer}
+    .page-title{display:flex;align-items:center;justify-content:space-between;gap:12px}.page-title h2{margin:0}.stat-link{cursor:pointer}.stat-link:focus-visible,.gear-btn:focus-visible,.page-nav button:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+    .engine-stat{padding:0;overflow:hidden}.engine-stat>summary{list-style:none;padding:14px 16px;cursor:pointer}.engine-stat>summary::-webkit-details-marker{display:none}.engine-stat>summary .stat-value{display:flex;justify-content:space-between;align-items:center;gap:10px}
+    #operations-page>.config-panel{display:none}
+    @media(max-width:1100px){.mission-facts{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:540px){.mission-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.event-node{flex-basis:210px}}
   </style>
 </head>
 <body>
   <main class="shell">
     <header class="top">
       <div class="brand"><div class="mark" aria-hidden="true">P</div><div><div class="eyebrow">Local operations</div><h1>Perceptron SRE</h1></div></div>
-      <div class="connection"><span id="connection-dot" class="dot offline"></span><span id="connection">Connecting to local runtime…</span></div>
+      <div class="top-actions"><div class="connection"><span id="connection-dot" class="dot offline"></span><span id="connection">Connecting to local runtime…</span></div><button id="settings-tab" class="gear-btn" type="button" title="Runtime configuration" aria-label="Open runtime configuration">⚙</button></div>
     </header>
-    <nav class="page-nav" aria-label="Dashboard pages"><button id="operations-tab" type="button" aria-current="page">Operations</button><button id="simulation-tab" type="button">Simulation</button><button id="store-tab" type="button">Engine Store</button></nav>
+    <nav class="page-nav" aria-label="Dashboard pages"><button id="operations-tab" type="button" aria-current="page">Operations</button><button id="security-tab" type="button">Security</button><button id="simulation-tab" type="button">Simulation</button><button id="store-tab" type="button">Engine Store</button></nav>
     <div id="operations-page">
+    <section class="section" aria-labelledby="timeline-heading"><div class="section-head"><div><div class="header-label">Event stream · newest on left</div><h3 id="timeline-heading">Event timeline &amp; provenance</h3><div id="provenance" class="section-sub">Expandable event cards · left is newest, right is oldest</div></div></div><div id="event-list" class="event-rail"><div class="empty">Waiting for event lineage…</div></div></section>
     <section class="decision-grid" aria-label="Mission decision and recommended next step">
       <section class="hero" aria-live="polite">
-        <div class="hero-copy"><div class="hero-label" id="scope">Mission assessment</div><h2 id="mission-headline">Waiting for first assessment</h2><p>Objective: <span id="objective">Waiting for mission objective</span></p><ul id="mission-factors" class="mission-factors"><li>The dashboard will update as soon as the first observation cycle completes.</li></ul></div>
+        <div class="hero-copy"><div class="hero-label">The Alert Window · <span id="scope">Mission assessment</span></div><h2 id="mission-headline">Waiting for first assessment</h2><p>Objective: <span id="objective">Waiting for mission objective</span></p><ul id="mission-factors" class="mission-factors"><li>The dashboard will update as soon as the first observation cycle completes.</li></ul><button id="alert-security" class="section-sub stat-link" type="button">Security posture: not assessed · view assessment</button></div>
         <div id="mission-badge" class="badge unknown">WAITING</div>
       </section>
-      <section class="recommendation" aria-live="polite"><div class="recommendation-head"><div><span class="advisory">Advisory · no automatic execution</span><h3 id="recommendation-title">Waiting for recommendation</h3><p id="recommendation-rationale">A recommendation will appear after the first assessment.</p></div><button id="refresh-tool" class="action-btn" type="button">Run read-only refresh</button></div><div class="action-note">Tool: <strong>host-observation-refresh</strong> · Collects current host metrics only; makes no system changes.</div><div id="tool-activity" class="tool-status" style="margin-top:12px">No dashboard-triggered tool run yet.</div></section>
+      <section class="recommendation" aria-live="polite"><div class="recommendation-head"><div><div class="hero-label">Suggested Mitigation Window</div><span class="advisory">Advisory · no automatic execution</span><h3 id="recommendation-title">Waiting for recommendation</h3><p id="recommendation-rationale">A recommendation will appear after the first assessment.</p></div><button id="refresh-tool" class="action-btn" type="button">Run read-only refresh</button></div><div class="action-note">Tool: <strong>host-observation-refresh</strong> · Collects current host metrics only; makes no system changes.</div><div id="tool-activity" class="tool-status" style="margin-top:12px">No dashboard-triggered tool run yet.</div><details><summary>Recommendation evidence and policy</summary><div id="recommendation-rule" class="rule-id"></div><p id="recommendation-reason" class="section-sub"></p><div id="recommendation-evidence" class="evidence-list"></div></details></section>
     </section>
     <section id="stats" class="grid mission-facts" aria-label="Mission evidence summary"></section>
-    <details class="section config-panel"><summary>Runtime configuration · edit thresholds and enabled engines</summary><div class="section-sub">Changes are validated and written to the configuration file. External file edits are detected before the next collection cycle.</div><form id="configuration-form">
+    <details id="configuration-panel" class="section config-panel"><summary>Runtime configuration · edit thresholds and enabled engines</summary><div class="section-sub">Changes are validated and written to the configuration file. External file edits are detected before the next collection cycle.</div><form id="configuration-form">
       <div class="config-grid">
         <label>Host identifier<input id="cfg-host" type="text" required></label>
         <label>DNS probe target (blank disables)<input id="cfg-dns-name" type="text"></label>
@@ -640,25 +675,22 @@ const indexHTML = `<!doctype html>
     <div class="pyramid" role="region" aria-label="Assessment reasoning pyramid">
       <section class="tier tier-diagnosis">
         <div class="tier-label"><span class="tier-number">1</span> Root-cause assessment</div>
-        <section class="section" aria-labelledby="diagnosis-heading"><div class="section-head"><div><h3 id="diagnosis-heading">What is driving this assessment?</h3><div class="section-sub">Leading evidence and contributing component states; not a causal claim beyond the available evidence</div></div></div><div id="diagnosis-summary" class="diagnosis-summary">Waiting for assessment evidence…</div><div id="diagnosis-factors" class="diagnosis-factors"></div><p class="diagnosis-footnote">Unknown is a valid result. GREEN requires complete, valid, fresh required evidence; missing or stale evidence is never healthy by default. Recommendations are not authorization, and this prototype's rule-based findings are not proof of root cause.</p><div class="reasoning-evidence"><div id="recommendation-rule" class="rule-id">Waiting for rule…</div><p id="recommendation-reason" class="section-sub">Waiting for evidence…</p><div id="recommendation-evidence" class="evidence-list"></div></div></section>
-      </section>
-      <section class="tier tier-engines">
-        <div class="tier-label"><span class="tier-number">2</span> Reasoning engines</div>
-        <section class="section"><div class="section-head"><div><h3>Engine execution</h3><div class="section-sub">Runtime availability is distinct from the health result an engine produces</div></div></div><div id="engine-status" class="engine-list"><div class="empty">Waiting for engine status…</div></div></section>
+        <section class="section" aria-labelledby="diagnosis-heading"><div class="section-head"><div><h3 id="diagnosis-heading">What is driving this assessment?</h3><div class="section-sub">Leading evidence and contributing component states; not a causal claim beyond the available evidence</div></div></div><div id="diagnosis-summary" class="diagnosis-summary">Waiting for assessment evidence…</div><div id="diagnosis-factors" class="diagnosis-factors"></div><p class="diagnosis-footnote">Unknown is a valid result. GREEN requires complete, valid, fresh required evidence; missing or stale evidence is never healthy by default. Recommendations are not authorization, and this prototype's rule-based findings are not proof of root cause.</p></section>
       </section>
       <section class="tier tier-components">
         <div class="tier-label"><span class="tier-number">3</span> Components</div>
         <section class="section"><div class="section-head"><div><h3>Component health by category</h3><div class="section-sub">Signals grouped by domain with their derived component assessment</div></div></div><div id="components" class="category-stack"><div class="empty">Waiting for assessment data…</div></div></section>
-        <section class="section"><div class="section-head"><div><h3>Security posture findings</h3><div class="section-sub">Findings from configured security evidence; an empty list means no evidence was supplied, not that security is verified.</div></div></div><div id="security-findings" class="category-stack"><div class="empty">Waiting for security evidence…</div></div></section>
       </section>
       <section class="tier tier-evidence">
         <div class="tier-label"><span class="tier-number">4</span> Source evidence and event record</div>
         <section class="section"><div class="section-head"><div><h3>Metrics and observations</h3><div class="section-sub">Underlying values, unavailable reasons, and observation times</div></div></div><div class="table-wrap"><table><thead><tr><th>Signal</th><th>Value</th><th>Observation</th><th>Observed at</th></tr></thead><tbody id="observations"><tr><td colspan="4" class="empty">Waiting for observations…</td></tr></tbody></table></div></section>
         <section class="section"><div class="section-head"><div><h3>Application logs</h3><div class="section-sub">Runtime diagnostics are emitted separately from the assessment event stream</div></div></div><p class="section-sub">Structured JSON logs are written to stderr (normally collected by the system journal under systemd). Log history is not retained or displayed in this dashboard.</p></section>
-        <section class="section"><div class="section-head"><div><h3>Event timeline and provenance</h3><div id="provenance" class="section-sub">Source observations → derived assessments</div></div></div><p id="incident-capture-note" class="incident-note">Current-cycle events only. This prototype does not retain the 60 seconds before an incident or track mitigation and its five-minute recovery window.</p><div id="event-list" class="event-list"><div class="empty">Waiting for event lineage…</div></div><details><summary>Inspect event payloads</summary><pre id="events">Waiting for events…</pre></details></section>
+        <section class="section"><div class="section-head"><div><h3>Incident evidence limits</h3></div></div><p id="incident-capture-note" class="incident-note">Current-cycle events only. This prototype does not retain the 60 seconds before an incident or track mitigation and its five-minute recovery window.</p><details><summary>Complete event record</summary><pre id="events">Waiting for events…</pre></details></section>
       </section>
     </div>
     </div>
+    <section id="security-page" hidden><section class="section"><div class="page-title"><div><div class="header-label">Risk posture</div><h2>Security assessment</h2><div class="section-sub">Security findings are reviewed separately from urgent on-call alerts. No findings does not mean security is cleared.</div></div><div id="security-page-status" class="badge unknown">NOT ASSESSED</div></div><div id="security-page-summary" class="diagnosis-summary">Waiting for security assessment…</div><h3>Security posture findings</h3><div id="security-findings" class="category-stack"><div class="empty">Waiting for security evidence…</div></div></section></section>
+    <section id="settings-page" hidden><div class="page-title"><div><div class="header-label">Runtime controls</div><h2>Configuration</h2></div><button id="settings-back" class="secondary-btn" type="button">Back to operations</button></div></section>
     <section id="simulation-page" hidden>
       <section class="section"><div class="section-head"><div><h2>Simulation lab</h2><div class="section-sub">Explore deterministic synthetic conditions and alternate thresholds without affecting the live system.</div></div></div><p class="incident-note">Simulation runs in a fresh built-in-engine runtime using synthetic inputs. It does not read or write host state, run plugins, replace the live report, or authorize actions. Results are clearly labeled synthetic and are not production observations.</p>
         <div class="config-actions"><label for="simulation-scenario">Scenario</label><select id="simulation-scenario"><option value="normal">Normal baseline</option><option value="cpu-warning">Elevated CPU pressure</option><option value="cpu-critical">Critical CPU pressure</option><option value="missing-memory">Missing memory evidence</option><option value="stale-memory">Stale memory evidence</option><option value="security-critical">Security finding: critical</option></select></div>
@@ -749,18 +781,22 @@ const indexHTML = `<!doctype html>
       });
       byId("store-status").textContent=currentCatalog.length+" catalog engines. No remote packages are downloaded.";
     }
+    byId("settings-page").append(byId("configuration-panel"));
     function showPage(page) {
-      byId("operations-page").hidden=page!=="operations";
-      byId("simulation-page").hidden=page!=="simulation";
-      byId("store-page").hidden=page!=="store";
-      [["operations","operations-tab"],["simulation","simulation-tab"],["store","store-tab"]].forEach(([name,id])=>{
-        if(name===page)byId(id).setAttribute("aria-current","page");else byId(id).removeAttribute("aria-current");
-      });
+      ["operations","security","simulation","store","settings"].forEach(name=>{byId(name+"-page").hidden=name!==page;});
+      document.querySelectorAll(".page-nav button").forEach(button=>button.removeAttribute("aria-current"));
+      const activeTab=page==="settings"?"operations":page;
+      const tab=byId(activeTab+"-tab");
+      if(tab)tab.setAttribute("aria-current","page");
       if(page==="store")loadCatalog().catch(error=>byId("store-status").textContent=error.message||"Engine catalog unavailable.");
     }
     byId("operations-tab").addEventListener("click",()=>showPage("operations"));
+    byId("security-tab").addEventListener("click",()=>showPage("security"));
     byId("simulation-tab").addEventListener("click",()=>showPage("simulation"));
     byId("store-tab").addEventListener("click",()=>showPage("store"));
+    byId("settings-tab").addEventListener("click",()=>showPage("settings"));
+    byId("settings-back").addEventListener("click",()=>showPage("operations"));
+    byId("alert-security").addEventListener("click",()=>showPage("security"));
     byId("configuration-form").addEventListener("input",()=>{configurationDirty=true;setConfigStatus("Unsaved changes.",false);});
     byId("configuration-form").addEventListener("change",()=>{configurationDirty=true;setConfigStatus("Unsaved changes.",false);});
     byId("discard-config").addEventListener("click",()=>{configurationDirty=false;renderConfiguration(currentConfiguration);});
@@ -853,20 +889,32 @@ const indexHTML = `<!doctype html>
         byId("components").append(section);
       });
     }
-    function renderEngines(metrics) {
-      clear(byId("engine-status"));
+    function renderEngines(metrics, target) {
+      clear(target);
       const engines = metrics.engines || {};
       const coreServices = metrics.core_services || {};
       const entries = Object.keys(engines).map(name=>({name,item:engines[name],core:false})).concat(Object.keys(coreServices).map(name=>({name,item:coreServices[name],core:true}))).sort((left,right)=>left.name.localeCompare(right.name));
-      if (!entries.length) { byId("engine-status").append(text("div","empty","No engine executions are recorded.")); return; }
+      if (!entries.length) { target.append(text("div","empty","No engine executions are recorded.")); return "NONE RECORDED"; }
+      const available=entries.filter(entry=>Number(entry.item.runs||0)>0&&Number(entry.item.failures||0)===0).length;
       entries.forEach(entry => {
         const item = entry.item;
         const failed = Number(item.failures || 0) > 0;
         const status = failed ? "FAILED" : (Number(item.runs || 0) > 0 ? "AVAILABLE" : "IDLE");
         const card = text("div","engine-chip","");
         card.append(text("strong","",(entry.core?"Core · ":"")+entry.name),text("span","",status + " · " + String(item.duration_millis || 0) + " ms"));
-        byId("engine-status").append(card);
+        target.append(card);
       });
+      return available+" / "+entries.length+" available";
+    }
+    function engineStat(metrics) {
+      const card=document.createElement("details");
+      card.className="stat engine-stat";
+      const summary=document.createElement("summary");
+      summary.append(text("div","stat-label","Reasoning engines"),text("div","stat-value","Expand availability"));
+      const list=text("div","engine-list","");
+      card.append(summary,list);
+      summary.querySelector(".stat-value").textContent=renderEngines(metrics,list);
+      return card;
     }
     function renderDiagnosis(mission) {
       const components = (mission.components || []).slice();
@@ -921,7 +969,7 @@ const indexHTML = `<!doctype html>
         const link = text("button","evidence-item evidence-link","↳ Event_ID: " + id);
         link.type = "button";
         link.addEventListener("click",() => {
-          const target = document.querySelector('[data-event-id="' + id + '"]');
+          const target = Array.from(document.querySelectorAll("[data-event-id]")).find(item=>item.dataset.eventId===id);
           if (target) { target.scrollIntoView({behavior:"smooth",block:"center"}); target.classList.add("evidence-highlight"); window.setTimeout(() => target.classList.remove("evidence-highlight"),1800); }
         });
         byId("recommendation-evidence").append(link);
@@ -938,10 +986,13 @@ const indexHTML = `<!doctype html>
       clear(byId("event-list"));
       if (!events.length) { byId("event-list").append(text("div","empty","No events are available.")); return; }
       const names = {"assessment.cycle.started.v1":"Cycle started","observation.host.v1":"Host observation","pressure.host.v1":"Pressure assessment","health.host.v1":"Component health","mission.host.v1":"Mission assessment"};
-      events.slice().sort((left,right) => new Date(left.occurred_at) - new Date(right.occurred_at)).forEach(event => {
-        const item = text("div","timeline-item","");
+      events.slice().sort((left,right) => new Date(right.occurred_at) - new Date(left.occurred_at)).forEach(event => {
+        const item = document.createElement("details");
+        item.className="event-node";
         item.dataset.eventId = event.event_id || "";
-        item.append(text("span","timeline-time",localTime(event.occurred_at)),text("strong","",names[event.type] || event.type),text("span","",(event.source || "unknown source") + (event.emitted_at && event.emitted_at !== event.occurred_at ? " · emitted " + localTime(event.emitted_at) : "")),text("code","","Event_ID: " + (event.event_id || "unknown id") + (event.derives_from && event.derives_from.length ? " · derives from " + event.derives_from.length + " event(s)" : "")));
+        const summary=document.createElement("summary");
+        summary.append(text("time","timeline-time",localTime(event.occurred_at)),text("strong","",names[event.type]||event.type),text("span","",(event.source||"unknown source")+" · origin: "+(event.origin||"unknown")),text("code","","Event_ID: "+(event.event_id||"unknown id")));
+        item.append(summary,text("div","event-provenance","Emitted: "+localTime(event.emitted_at||event.occurred_at)+" · Derives from: "+((event.derives_from||[]).map(id=>"Event_ID: "+id).join(", ")||"none")),text("pre","",JSON.stringify(event.payload==null?{}:event.payload,null,2)));
         byId("event-list").append(item);
       });
     }
@@ -958,16 +1009,33 @@ const indexHTML = `<!doctype html>
       renderConfiguration(data.configuration);
       renderSimulationDefaults(data.configuration);
       clear(byId("stats"));
+      const events = runtime.events || [];
+      const securityFindings=mission.security_findings||[];
+      const securityAssessed=(data.configuration&&data.configuration.engines||[]).includes("security-posture");
+      const securityStatus=securityFindings.some(item=>item.state==="CRITICAL"||item.state==="WARNING")?"REVIEW":(securityFindings.length?"ASSESSED":"NOT ASSESSED");
+      byId("alert-security").textContent="Security posture: "+securityStatus+" · view assessment";
+      byId("security-page-status").textContent=securityStatus;
+      byId("security-page-status").className="badge "+(securityStatus==="REVIEW"?"yellow":"unknown");
+      byId("security-page-summary").textContent=securityFindings.length
+        ? securityFindings.length+" assessed finding(s) are shown below. Review evidence and source freshness; this summary is not an independent security verification."
+        : securityAssessed?"Security posture is enabled, but this cycle contains no assessed findings. Missing evidence is not a clearance."
+        :"The security-posture engine is not enabled and no security findings are available. This is not a security clearance.";
       byId("stats").append(
         stat("Mission status",status,mission.disposition || "No disposition"),
         stat("Assessment coverage",String((mission.coverage && mission.coverage.assessed_components || []).length) + " / " + String((mission.coverage && mission.coverage.required_components || []).length),mission.coverage && mission.coverage.complete ? "All required scopes represented" : "Coverage incomplete"),
         stat("Evidence freshness",mission.freshness || "unknown","Freshness is distinct from coverage"),
-        stat("Observations",String(data.available_observations || 0) + " available",String(data.unavailable_observations || 0) + " unavailable")
+        stat("Observations",String(data.available_observations || 0) + " available",String(data.unavailable_observations || 0) + " unavailable"),
+        engineStat(metrics)
       );
-      const events = runtime.events || [];
+      const securityCard=stat("Security posture",securityStatus,securityFindings.length?securityFindings.length+" finding(s) · review separately":"Not assessed · not a clearance");
+      securityCard.classList.add("stat-link");
+      securityCard.tabIndex=0;
+      securityCard.setAttribute("role","button");
+      securityCard.addEventListener("click",()=>showPage("security"));
+      securityCard.addEventListener("keydown",event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();showPage("security");}});
+      byId("stats").append(securityCard);
       renderCategories(data,mission,events);
       renderDiagnosis(mission);
-      renderEngines(metrics);
       renderSecurityFindings(events);
       renderRecommendation(data.recommendation || {},data.tool_activity || null);
       renderTimeline(events);
@@ -980,8 +1048,8 @@ const indexHTML = `<!doctype html>
         row.append(text("td","metric",value.metric || "unknown signal"),text("td","value",val),text("td","reason",value.available ? (value.target ? "Target: " + value.target : "Available") : (value.unavailable_reason || "Unavailable; reason not supplied")),text("td","",localTime(value.observed_at || event.occurred_at)));
         byId("observations").append(row);
       });
-      byId("provenance").textContent = "Cycle " + (runtime.cycle_id || "unknown") + " · " + String(events.length) + " events · " + String(metrics.duration_millis || 0) + " ms";
-      byId("events").textContent = JSON.stringify(events.map(event => ({Event_ID:"Event_ID: " + (event.event_id || "unknown id"),type:event.type,source:event.source,producer_version:event.producer_version,configuration_id:event.configuration_id,occurred_at:event.occurred_at,derives_from:(event.derives_from || []).map(id => "Event_ID: " + id),payload:event.payload})),null,2);
+      byId("provenance").textContent = "Cycle " + (runtime.cycle_id || "unknown") + " · " + String(events.length) + " events · " + String(metrics.duration_millis || 0) + " ms · expandable evidence";
+      byId("events").textContent = JSON.stringify(events.map(event => ({Event_ID:"Event_ID: " + (event.event_id || "unknown id"),type:event.type,source:event.source,origin:event.origin,producer_version:event.producer_version,configuration_id:event.configuration_id,occurred_at:event.occurred_at,derives_from:(event.derives_from || []).map(id => "Event_ID: " + id),payload:event.payload})),null,2);
       byId("updated").textContent = "Report evaluated " + localTime(runtime.completed_at || mission.evaluated_at);
       byId("connection").textContent = "Live · refreshes every 3 seconds";
       byId("connection-dot").className = "dot";

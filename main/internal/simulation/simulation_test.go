@@ -21,6 +21,11 @@ func TestRunScenarioKeepsSyntheticResultSeparateAndReportsExpectedState(t *testi
 	if result.Report.Runtime.CycleID[:11] != "simulation-" {
 		t.Fatalf("simulation cycle is not labeled as synthetic: %q", result.Report.Runtime.CycleID)
 	}
+	for _, event := range result.Report.Runtime.Events {
+		if event.Origin != model.OriginSimulation {
+			t.Fatalf("synthetic event lost simulation origin: %#v", event)
+		}
+	}
 }
 
 func TestRunSecurityScenarioProducesSyntheticSecurityFinding(t *testing.T) {

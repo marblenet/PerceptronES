@@ -18,7 +18,8 @@ The implementation sequence is maintained separately in the [Implementation Road
 8. RFC-0005 — DNS Traffic Handler.
 9. RFC-0007 — mission assurance.
 10. [RFC-0012: Engine Store and Telemetry Interoperability](RFC-0012-engine-store-and-telemetry-interoperability.md) — engine catalog, package governance, and legacy metrics interoperability.
-11. Follow-on RFCs in the overall architecture roadmap — simulation, DNS integration, security, deployment, and other concerns.
+11. [Engine Platform Addendum](ENGINE-PLATFORM-ADDENDUM.md) — tap engines, contributor proof contracts, event origins, human-operation records, and simulation boundaries.
+12. Follow-on RFCs in the overall architecture roadmap — simulation, DNS integration, security, deployment, and other concerns.
 
 ## Architecture diagrams
 
