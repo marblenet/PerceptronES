@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"perceptronsre/internal/metrics"
 	"perceptronsre/internal/model"
 )
 
@@ -128,6 +129,9 @@ func assessMissionWithSecurity(hostID, dnsProbeName string, components []model.H
 				status = model.MissionYellow
 			}
 		case model.HealthUnknown:
+			if metrics.IsAdvisoryComponent(component.Component) {
+				continue
+			}
 			hasUnknown = true
 			if status != model.MissionRed && status != model.MissionYellow {
 				status = model.MissionUnknown

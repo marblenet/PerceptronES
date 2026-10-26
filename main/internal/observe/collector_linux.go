@@ -23,6 +23,7 @@ func collectHost(ctx context.Context, cfg config.Config) ([]model.Observation, e
 	}
 	observations := make([]model.Observation, 0, 7+len(cfg.FilesystemPaths))
 	firstCPU, firstErr := readCPUTicks()
+	firstExtended := takeExtendedSnapshot()
 	if firstErr == nil {
 		timer := time.NewTimer(sampleDuration)
 		select {
@@ -98,6 +99,7 @@ func collectHost(ctx context.Context, cfg config.Config) ([]model.Observation, e
 		}
 		observations = append(observations, probe)
 	}
+	observations = append(observations, collectExtended(cfg, firstExtended, takeExtendedSnapshot(), now)...)
 	return observations, nil
 }
 

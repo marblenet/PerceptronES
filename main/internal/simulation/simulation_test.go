@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"perceptronsre/internal/config"
 	"perceptronsre/internal/model"
@@ -25,6 +26,70 @@ func TestRunScenarioKeepsSyntheticResultSeparateAndReportsExpectedState(t *testi
 		if event.Origin != model.OriginSimulation {
 			t.Fatalf("synthetic event lost simulation origin: %#v", event)
 		}
+	}
+}
+
+func TestRunSnapshotForksObservationsAsSimulation(t *testing.T) {
+	source, err := RunScenario(context.Background(), config.Default(), "normal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot []model.Observation
+	for _, event := range source.Report.Runtime.Events {
+		if event.Type == model.TypeObservation {
+			var observation model.Observation
+			if err := json.Unmarshal(event.Payload, &observation); err != nil {
+				t.Fatal(err)
+			}
+			snapshot = append(snapshot, observation)
+		}
+	}
+	critical := 99.0
+	result, err := RunSnapshot(context.Background(), config.Default(), "live-cycle-1", snapshot, Inputs{CPUPercent: &critical})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SnapshotOf != "live-cycle-1" || result.Report.Runtime.Mission == nil || result.Report.Runtime.Mission.Status != model.MissionRed {
+		t.Fatalf("snapshot fork did not apply override on captured observations: %#v", result.SnapshotOf)
+	}
+	if *snapshot[0].Value == critical {
+		t.Fatal("snapshot input was mutated by the fork")
+	}
+	for _, event := range result.Report.Runtime.Events {
+		if event.Origin != model.OriginSimulation {
+			t.Fatalf("snapshot event lost simulation origin: %#v", event)
+		}
+	}
+	if _, err := RunSnapshot(context.Background(), config.Default(), "x", nil, Inputs{}); err == nil {
+		t.Fatal("empty snapshot must be rejected")
+	}
+}
+
+func TestRunSnapshotKeepsUnavailableObservationsUnknown(t *testing.T) {
+	cpu, memory := 20.0, 40.0
+	snapshot := []model.Observation{
+		{Metric: "cpu.utilization_percent", Component: "cpu", Value: &cpu, Unit: "percent", Available: true, ObservedAt: time.Now().UTC()},
+		{Metric: "memory.used_percent", Component: "memory", Unit: "percent", Available: false, Reason: "collector failed", ObservedAt: time.Now().UTC()},
+	}
+	override := 30.0
+	result, err := RunSnapshot(context.Background(), config.Default(), "live-2", snapshot, Inputs{CPUPercent: &override, MemoryPercent: &memory})
+	if err != nil {
+		t.Fatalf("unavailable live observation must not fail the fork: %v", err)
+	}
+	if result.Report.Runtime.Mission == nil || result.Report.Runtime.Mission.Status == model.MissionGreen {
+		t.Fatalf("missing memory evidence must not produce GREEN: %#v", result.Report.Runtime.Mission)
+	}
+}
+
+func TestBuildLiveIncidentLabelsChainsLiveAndKeepsUnknowns(t *testing.T) {
+	incident := BuildLiveIncident("c1", nil)
+	for _, link := range append(append([]ChainLink{}, incident.WhyChain...), incident.HowChain...) {
+		if link.Origin != model.OriginLive {
+			t.Fatalf("live chain link has wrong origin: %#v", link)
+		}
+	}
+	if incident.WhyChain[len(incident.WhyChain)-1].Status != "unknown" {
+		t.Fatal("root cause must remain unknown")
 	}
 }
 
@@ -90,6 +155,15 @@ func TestRunScenarioAppliesSyntheticMeasurementAndThresholdInputs(t *testing.T) 
 	}
 	if result.IncidentReport.Status != string(model.MissionYellow) || len(result.IncidentReport.ContributingFactors) == 0 {
 		t.Fatalf("simulation did not produce a useful incident summary: %#v", result.IncidentReport)
+	}
+	for _, link := range append(append([]ChainLink{}, result.IncidentReport.WhyChain...), result.IncidentReport.HowChain...) {
+		if link.Origin != model.OriginSimulation || link.Status == "" {
+			t.Fatalf("chain link not labeled as simulation: %#v", link)
+		}
+	}
+	whyLast := result.IncidentReport.WhyChain[len(result.IncidentReport.WhyChain)-1]
+	if whyLast.Status != "unknown" {
+		t.Fatalf("root cause must remain unknown, got %#v", whyLast)
 	}
 	for _, event := range result.Report.Runtime.Events {
 		if event.Type != model.TypeObservation {

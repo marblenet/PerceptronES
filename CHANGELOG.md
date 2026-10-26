@@ -1,5 +1,54 @@
 # Changelog
 
+## 2026-10-26
+
+### Top 50 host metrics
+- Added `internal/metrics`, a catalog of 50 host metrics (original 7 + 43 new): CPU detail, load 5m/15m, memory/swap/commit/OOM, PSI pressure, filesystem inodes/available/read-only, disk I/O, network errors/drops/rates/TCP/conntrack, and system (zombies, threads, file descriptors, PID usage, uptime, kernel taint). See roadmap Phase 1.3 for the full table.
+- Linux collector reads `/proc` and `/sys` only (`observe/extended_linux.go`; platform-neutral parsers in `observe/parse_proc.go` with fixture tests). Rates come from the two samples around the CPU interval and are short-window.
+- Unavailable sources produce unavailable observations with a reason, never zeros. Non-Linux builds report every catalog metric unavailable.
+- Observation validation and pressure thresholds are catalog-driven; new optional `metric_thresholds` config overrides catalog defaults (validated).
+- Extended metrics are advisory: they can raise the mission to YELLOW/RED, but an unavailable one does not force UNKNOWN. Core coverage requirements are unchanged.
+- Verification: gofmt, vet (also `GOOS=linux`), all tests, and build pass. A Linux binary ran on WSL1, where PSI, `/proc/vmstat`, `/proc/diskstats`, conntrack and others are absent and reported unavailable (20 of 51 observations). Not yet tested on Oracle Linux 9, the target platform.
+- Not done: dashboard presentation of the new metrics beyond the existing component views.
+
+## 2026-10-26
+
+### Five Whys / Five Hows incident reporting (documentation only; code not yet changed)
+
+- Added a domain-neutral Why chain / How chain section to [ENGINEERING-PHILOSOPHY.md](./DesignDocuments/ENGINEERING-PHILOSOPHY.md).
+- Added RFC-0008 section 7.1 (chain requirements, temporary vs. permanent mitigations, human actions as How evidence, recovery proven by post-mitigation observations, Why/How report views) and open decisions 12-14.
+- Added RFC-0009 section 6.2 (chains as knowledge, runbook, and simulation inputs, subject to review).
+- Confidence on chain links is marked as dependent on a future confidence model; none is emitted today.
+- Added diagram [D-13](./DesignDocuments/diagrams/D-13-why-how-chains.md), and linked it from the design README, diagram index, and roadmap (Phase 2.4).
+
+### Cascade, snapshot, and live Why/How in the dashboard
+
+- Operations page: "Reasoning cascade (L1 → L6)" view using the memo layer names (L1 Metadata/Data, L2 Information, L3 Determination, L4 Assessment, L5 Incident Report, L6 Mitigation, ↺ L5 resolution/recurrence). Events map to L1–L4 by event type (table in ENGINE-PLATFORM-ADDENDUM.md); unknown types show as "Unmapped". L6 is recommendation-only and resolution/recurrence is shown Unknown.
+- Operations page: Why/How tabs now also render for the live assessment (`live_incident` in `/api/report`), origin `live`, root cause/executed mitigation/recovery `unknown`, no confidence.
+- Simulation page: "Fork from live snapshot" runs `/api/simulate` with `use_snapshot`, replaying the latest live host observations (original timestamps preserved, so stale stays stale) through the isolated runtime as `simulation` origin. Security evidence in a snapshot fork is a synthetic placeholder. The live report is not modified. Simulation also shows its own cascade.
+- Tests cover snapshot fork, input immutability, live chain labels, and the new dashboard endpoints.
+
+### Why/How chains in code
+
+- Simulation incident reports now include `why_chain`, `how_chain`, and `chain_note` (`ChainLink`: step, statement, status observed/proposed/unknown, mitigation class, evidence, origin=simulation). Root cause, executed mitigation, and recovery are explicitly `unknown`; candidate mitigations are `unclassified`; no confidence is emitted.
+- Simulation page shows Why / How tabs on the synthetic incident report.
+- Tests cover chain presence, simulation origin labeling, and unknown root cause.
+
+## 2026-10-26
+
+### Engineering memo alignment (documentation first)
+
+- Updated [ENGINEERING-PHILOSOPHY.md](./DesignDocuments/ENGINEERING-PHILOSOPHY.md) with an explicit documentation-first workflow (`Document -> Review -> Approve -> Implement -> Test -> Validate`), clarified perceptron semantics (multi-input weighted reasoning), and documented the forward-only deterministic cascade (no runtime backpropagation/self-learning).
+- Expanded [ENGINE-PLATFORM-ADDENDUM.md](./DesignDocuments/ENGINE-PLATFORM-ADDENDUM.md) with explicit cascade engine classes (tap, layer-1, layer-2, assessment, recommendation, policy), plugin-ecosystem direction, and contributor expectations.
+- Updated [DesignDocuments/README.md](./DesignDocuments/README.md) and [IMPLEMENTATION-ROADMAP.md](./Implementation/IMPLEMENTATION-ROADMAP.md) to reinforce the documentation-before-implementation gate.
+
+### Dashboard behavior updates from memo direction
+
+- Kept runtime configuration in a dedicated Settings page opened from a top-right gear, while preserving Simulation and Engine Store pages.
+- Added a Security page in dashboard navigation for focused security review, separate from live alert handling.
+- Promoted event timeline/provenance to the top of Operations and rendered events as newest-left expandable cards with payload/provenance details.
+- Added explicit top-row incident and confidence context cards (`Active incidents`, `Confidence`) without implying unavailable confidence modeling.
+
 ## 2026-10-23
 
 ### Dashboard appearance

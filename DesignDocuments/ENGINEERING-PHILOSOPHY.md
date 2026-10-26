@@ -6,6 +6,14 @@
 
 This document explains the rationale behind Perceptron SRE's engineering guardrails. It guides decisions where an RFC does not yet prescribe an implementation; it does not silently resolve the RFCs' open decisions or claim that planned capabilities exist.
 
+## Documentation before implementation
+
+Perceptron SRE follows a strict sequence:
+
+Document -> Review -> Approve -> Implement -> Test -> Validate.
+
+Architecture documents, RFCs, engineering memos, and implementation guides are updated before implementation begins when requirements change. Design remains the source of truth; code implements the architecture and must not become the architecture by accident.
+
 ## Why Perceptron SRE exists
 
 Operational systems often provide either narrow deterministic rules ("if X, do Y") or flexible probabilistic analysis. Rules are useful and reproducible but can miss context when signals are partial or interact. Broad generative systems can interpret varied inputs, but their outputs are probabilistic and are not, by themselves, a dependable authority for operational conclusions or actions.
@@ -18,7 +26,11 @@ The name describes an architectural approach: focused computational units contri
 
 A one-condition binary rule can answer whether one threshold was crossed. A bounded reasoning chain can additionally preserve the measurement's time and scope, identify missing or stale signals, combine related assessments, and explain how the resulting mission status follows from the available evidence. Threshold rules remain useful components; the distinction is the composition and traceability of evidence, not a claim that every individual rule is inherently intelligent.
 
+For this project, a perceptron is the smallest reasoning unit that evaluates multiple weighted inputs and produces a confidence-bearing or thresholded determination. Single-input checks typically remain taps, collectors, or simple conditionals rather than full perceptrons.
+
 The current Go prototype implements explicit rules for a narrow host pressure/health chain. It does not currently perform probabilistic learning, general root-cause inference, or LLM-based operational decision-making. New engines must declare their contracts and semantics; claims about confidence, learning, or determinism must match their actual behavior and tests.
+
+The architecture uses a forward-only reasoning cascade. It does not perform runtime backpropagation, runtime self-learning, or hidden parameter updates. Behavioral change is introduced through reviewed configuration and code changes, not autonomous model mutation.
 
 ## Reliability principles
 
@@ -53,6 +65,25 @@ Synthetic inputs and isolated simulations should make important operating and fa
 ### Prefer dependable engineering over premature autonomy
 
 Perceptron SRE is intended for long-lived, operationally consequential use. The useful analogy is mission-critical engineering: favor understood behavior, explicit failure modes, observability, limited privileges, ownership, rollback, and upgrade compatibility over adding capability quickly. This mindset does not claim that the project is certified to aerospace, medical, or industrial standards. Production changes remain gated by policy, approval where required, and post-action verification.
+
+### Prioritize understanding over metric display
+
+Perceptron dashboards should explain reasoning, not merely display telemetry. Operators should be able to see mission/security/operational state, then drill into assessments, coverage/freshness/confidence context, contributing determinations and engines, and finally raw taps and events. Every surfaced assessment should answer why, based on what evidence, and with what uncertainty/limitations.
+
+### Complete the learning cycle: Why chain and How chain (Proposed)
+
+An incident report should eventually hold two linked reasoning chains, not only a root cause:
+
+- **Why chain** walks backward through causality: what was observed, its proximate cause, contributing factors, root cause, and process or control gaps.
+- **How chain** walks forward through remediation: what mitigation was applied, how it changed system state, how service or mission function was restored, and why the mitigation worked.
+
+Five links in each chain is a minimum aspiration, not a quota. Depth should follow evidence; a shorter chain that ends in "unknown" is preferable to padding. Every link carries evidence references, provenance, and uncertainty. Numeric confidence applies only once a confidence model exists (RFC-0004); the current prototype does not emit confidence.
+
+The How chain must distinguish **temporary mitigations** (restart, cache clear, limit increase, queue drain, failover) from **permanent mitigations** (code fix, patch, policy or configuration change, added test, knowledge update). Restoring service is not the same as removing the cause, and "the fix worked" must itself be explained and checked against post-mitigation evidence.
+
+Human actions (including PES-run procedures, recorded as `human_action` events) are first-class How evidence with attribution. A recorded action is evidence of what was done, not proof it caused recovery and not authorization for repeat.
+
+The vocabulary is domain-neutral so it can serve multiple industries (for example IT services, industrial control, telecommunications, healthcare technology, and energy/utilities): *incident*, *impact*, *mitigation*, *recovery*, *prevention*. Domain profiles may add terminology and regulatory report fields but must not weaken evidence, provenance, or review rules. See RFC-0008 section 7.1 and RFC-0009 section 6.2.
 
 ## Applying this guidance
 

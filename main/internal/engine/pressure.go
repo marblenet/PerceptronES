@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"perceptronsre/internal/config"
+	"perceptronsre/internal/metrics"
 	"perceptronsre/internal/model"
 )
 
@@ -150,6 +151,12 @@ func (engine *pressureEngine) thresholdFor(metric string) (config.Threshold, boo
 			Critical: engine.config.Thresholds.LoadPerCPU.Critical * cpuCount,
 		}, true
 	default:
+		if override, ok := engine.config.MetricThresholds[metric]; ok {
+			return override, true
+		}
+		if def, ok := metrics.Lookup(metric); ok && def.Thresholded {
+			return config.Threshold{Warning: def.Warn, Critical: def.Crit}, true
+		}
 		return config.Threshold{}, false
 	}
 }

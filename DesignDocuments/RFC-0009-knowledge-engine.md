@@ -89,6 +89,10 @@ This is a conceptual learning loop, not an automatic promotion pipeline. Each li
 
 Where an incident or near miss becomes a regression scenario, preserve its source, scope, relevant versions/configuration, expected behavior, and any redactions or synthetic substitutions. The scenario must remain distinguishable from a live observation, and a passing replay validates only the encoded scenario—not the universal correctness or current applicability of a runbook. Creating, editing, or approving operational knowledge remains subject to review.
 
+### 6.2 Why/How chains as knowledge input (Proposed)
+
+A completed incident's Why chain (how to recognize the problem) and How chain (how it was mitigated, and why that worked) are candidate inputs for knowledge items, runbooks, simulation scenarios, and regression tests. Knowledge derived from them must keep links to the source incident, evidence, mitigation class (temporary or permanent), and review status. Temporary mitigations must not be recorded as prevention. Promotion to approved knowledge requires review per section 6; a successful past mitigation does not establish that it is safe or applicable now.
+
 ## 7. Trust model
 
 Candidate factors include:

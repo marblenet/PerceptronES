@@ -551,6 +551,23 @@ func TestRuntimeWithNoObservationsEmitsUnknownMission(t *testing.T) {
 	}
 }
 
+func TestAdvisoryComponentsRaiseButNeverLowerMissionToUnknown(t *testing.T) {
+	core := []model.HealthAssessment{
+		{Component: "cpu", State: model.HealthHealthy, ScopeID: "host-a", Freshness: "fresh"},
+		{Component: "memory", State: model.HealthHealthy, ScopeID: "host-a", Freshness: "fresh"},
+		{Component: "load", State: model.HealthHealthy, ScopeID: "host-a", Freshness: "fresh"},
+		{Component: "filesystem", State: model.HealthHealthy, ScopeID: "host-a", Freshness: "fresh"},
+	}
+	unknown := append(append([]model.HealthAssessment{}, core...), model.HealthAssessment{Component: "pressure", State: model.HealthUnknown, ScopeID: "host-a", Freshness: "fresh"})
+	if got := assessMission("host-a", "", unknown, time.Now().UTC()); got.Status != model.MissionGreen {
+		t.Fatalf("unavailable advisory metric changed mission to %s", got.Status)
+	}
+	critical := append(append([]model.HealthAssessment{}, core...), model.HealthAssessment{Component: "disk", State: model.HealthCritical, ScopeID: "host-a", Freshness: "fresh"})
+	if got := assessMission("host-a", "", critical, time.Now().UTC()); got.Status != model.MissionRed {
+		t.Fatalf("critical advisory metric produced %s", got.Status)
+	}
+}
+
 func TestMissionTreatsUnrecognizedHealthStateAsUnknown(t *testing.T) {
 	components := []model.HealthAssessment{
 		{Component: "cpu", State: model.HealthHealthy, ScopeID: "host-a", Freshness: "fresh"},

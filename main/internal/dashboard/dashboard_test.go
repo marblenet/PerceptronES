@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"context"
 	"encoding/json"
 	"io/ioutil"
 	"net"
@@ -100,6 +101,11 @@ func TestDashboardServesPageAndLatestReport(t *testing.T) {
 		!strings.Contains(pageHTML, "Unknown is a valid result") ||
 		!strings.Contains(pageHTML, "GREEN requires complete, valid, fresh required evidence") ||
 		!strings.Contains(pageHTML, "Event_ID: ") ||
+		!strings.Contains(pageHTML, "Reasoning cascade (L1") ||
+		!strings.Contains(pageHTML, "Fork from live snapshot") ||
+		!strings.Contains(pageHTML, "live-why") ||
+		!strings.Contains(pageHTML, "Why chain (backward causality)") ||
+		!strings.Contains(pageHTML, "How chain (forward remediation)") ||
 		!strings.Contains(pageHTML, "Event_ID:\"Event_ID: \"") ||
 		!strings.Contains(pageHTML, "(event.derives_from || []).map(id => \"Event_ID: \" + id)") ||
 		!strings.Contains(pageHTML, "textContent") ||
@@ -214,13 +220,59 @@ func TestDashboardRunsIsolatedSimulationWithoutReplacingLiveReport(t *testing.T)
 		t.Fatal(err)
 	}
 	if !result.Synthetic || result.Report.Runtime.Mission == nil || result.Report.Runtime.Mission.Status != model.MissionRed ||
-		result.IncidentReport.Status != string(model.MissionRed) || len(result.IncidentReport.ContributingFactors) == 0 {
+		result.IncidentReport.Status != string(model.MissionRed) || len(result.IncidentReport.ContributingFactors) == 0 ||
+		len(result.IncidentReport.WhyChain) < 2 || len(result.IncidentReport.HowChain) < 2 {
 		t.Fatalf("simulation endpoint returned unexpected result: %#v", result)
 	}
 	live := httptest.NewRecorder()
 	dashboard.Handler().ServeHTTP(live, httptest.NewRequest(http.MethodGet, "/api/report", nil))
 	if live.Code != http.StatusServiceUnavailable {
 		t.Fatalf("simulation unexpectedly populated/replaced live report: %d %s", live.Code, live.Body.String())
+	}
+}
+
+func TestDashboardSnapshotSimulationForksLatestReportWithoutChangingIt(t *testing.T) {
+	store, err := config.NewStore("unused-snapshot-dashboard-test.json", config.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dashboard := New()
+	dashboard.SetConfigStore(store)
+	post := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/api/simulate", strings.NewReader(body))
+		request.Header.Set("Origin", "http://127.0.0.1:8080")
+		request.Header.Set("X-Requested-With", "PerceptronDashboard")
+		response := httptest.NewRecorder()
+		dashboard.Handler().ServeHTTP(response, request)
+		return response
+	}
+	if response := post(`{"use_snapshot":true,"inputs":{}}`); response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("snapshot without live report returned %d", response.Code)
+	}
+	seed, err := simulation.RunScenario(context.Background(), config.Default(), "normal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := seed.Report
+	live.Runtime.CycleID = "live-cycle-fixture"
+	if err := dashboard.Update(live); err != nil {
+		t.Fatal(err)
+	}
+	response := post(`{"use_snapshot":true,"inputs":{"cpu_percent":99}}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("snapshot simulation returned %d: %s", response.Code, response.Body.String())
+	}
+	var result simulation.Result
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.Synthetic || result.SnapshotOf != live.Runtime.CycleID {
+		t.Fatalf("snapshot result not labeled: synthetic=%t of=%q", result.Synthetic, result.SnapshotOf)
+	}
+	report := httptest.NewRecorder()
+	dashboard.Handler().ServeHTTP(report, httptest.NewRequest(http.MethodGet, "/api/report", nil))
+	if report.Code != http.StatusOK || !strings.Contains(report.Body.String(), `"live_incident"`) {
+		t.Fatalf("live report missing live_incident: %d", report.Code)
 	}
 }
 

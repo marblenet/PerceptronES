@@ -6,6 +6,8 @@ This directory contains the architecture and implementation RFCs for Perceptron 
 
 The implementation sequence is maintained separately in the [Implementation Roadmap](../Implementation/IMPLEMENTATION-ROADMAP.md). The roadmap stages implementation work and provisional decisions; it does not replace or implicitly accept the RFCs.
 
+Perceptron SRE uses a documentation-first engineering workflow: document, review, approve, implement, test, then validate.
+
 ## Reading order
 
 1. [Engineering Philosophy](ENGINEERING-PHILOSOPHY.md) — rationale behind the evidence, reliability, determinism, and safety guardrails.
@@ -18,6 +20,8 @@ The implementation sequence is maintained separately in the [Implementation Road
 8. RFC-0005 — DNS Traffic Handler.
 9. RFC-0007 — mission assurance.
 10. [RFC-0012: Engine Store and Telemetry Interoperability](RFC-0012-engine-store-and-telemetry-interoperability.md) — engine catalog, package governance, and legacy metrics interoperability.
+Incident Why/How chains (proposed) are described in [Engineering Philosophy](ENGINEERING-PHILOSOPHY.md), RFC-0008 section 7.1, RFC-0009 section 6.2, and [D-13](diagrams/D-13-why-how-chains.md).
+
 11. [Engine Platform Addendum](ENGINE-PLATFORM-ADDENDUM.md) — tap engines, contributor proof contracts, event origins, human-operation records, and simulation boundaries.
 12. Follow-on RFCs in the overall architecture roadmap — simulation, DNS integration, security, deployment, and other concerns.
 

@@ -18,6 +18,7 @@ Diagrams are intentionally separated by question/use case so reviewers can inspe
 | D-10 | [Regional federation and degraded operation](D-10-regional-federation.md) | What evidence remains local, what can be federated, and how is a partition represented? | RFC-0001, RFC-0003, RFC-0007, RFC-0011 |
 | D-11 | [Incident report time window](D-11-incident-time-window.md) | What records are required for one minute before an incident through five minutes after mitigation? | RFC-0001, RFC-0004, RFC-0008, RFC-0009, RFC-0010 |
 | D-12 | [Engine package, Store, and trust lifecycle](D-12-engine-store.md) | How are engines contributed, reviewed, configured, enabled, and governed? | RFC-0002, RFC-0010, RFC-0012 |
+| D-13 | [Why chain and How chain](D-13-why-how-chains.md) | How do causal and remediation chains pair in an incident report and feed reviewed knowledge? | RFC-0004, RFC-0008, RFC-0009 |
 
 ## Rendering
 

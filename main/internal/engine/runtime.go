@@ -15,6 +15,7 @@ import (
 
 	"perceptronsre/internal/bus"
 	"perceptronsre/internal/config"
+	"perceptronsre/internal/metrics"
 	"perceptronsre/internal/model"
 )
 
@@ -447,6 +448,17 @@ func validateObservation(observation model.Observation) error {
 			if *observation.Value != 0 && *observation.Value != 1 {
 				return errors.New("dns.resolution_success must be 0 or 1")
 			}
+		default:
+			if def, ok := metrics.Lookup(observation.Metric); ok {
+				switch {
+				case def.Percent && (*observation.Value < 0 || *observation.Value > 100):
+					return fmt.Errorf("%s must be between 0 and 100", observation.Metric)
+				case def.Boolean && *observation.Value != 0 && *observation.Value != 1:
+					return fmt.Errorf("%s must be 0 or 1", observation.Metric)
+				case *observation.Value < 0:
+					return fmt.Errorf("%s must not be negative", observation.Metric)
+				}
+			}
 		}
 	}
 	if observation.Metric == "dns.resolution_success" {
@@ -477,6 +489,9 @@ func observationContract(metric string) (string, string, bool) {
 	case "dns.resolution_success":
 		return "dns", "boolean", true
 	default:
+		if def, ok := metrics.Lookup(metric); ok {
+			return def.Component, def.Unit, true
+		}
 		return "", "", false
 	}
 }

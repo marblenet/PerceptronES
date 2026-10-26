@@ -93,6 +93,25 @@ Unknown is preferable to a wrong or unsupported cause. Investigation may validly
 
 No causal inference algorithm or confidence update formula is selected.
 
+### 7.1 Why chain and How chain (Proposed)
+
+A completed incident report should link two chains to the same incident scope and time window (see D-11 and [D-13](diagrams/D-13-why-how-chains.md)):
+
+- **Why chain (backward):** observed impact -> proximate cause -> contributing factors -> root cause -> process/control gap. Each link is a hypothesis or finding with supporting and contradictory evidence, provenance, and limitations.
+- **How chain (forward):** mitigation action -> state change -> service/mission recovery -> user/impact normalization -> why the mitigation worked -> prevention. Each link cites post-action observations, not only the action itself.
+
+Requirements:
+
+1. Depth is evidence-driven; five links per chain is a minimum goal, not a required count. A chain may end in "unknown" and must say what evidence is missing.
+2. Each How link is classified **temporary** or **permanent** mitigation, or **unclassified** when unknown. Permanent mitigations should link to the Why-chain gap they address.
+3. Human actions (`human_action` origin, PES procedures) appear as attributed How evidence; they remain distinct from machine findings and from policy authorization.
+4. Recovery is shown by post-mitigation observations (at least the D-11 window), never assumed from action success ("no default green").
+5. Link confidence, where emitted, follows RFC-0004 semantics; no confidence formula is selected.
+6. Chains are derived from retained events and are replayable; simulated or replayed incidents are labeled by origin and must not be presented as live history.
+7. Domain-neutral terminology is used in the core model; industry profiles (for example IT, industrial, telecom, healthcare technology, utilities) may map fields to their reporting conventions without changing evidence rules.
+
+Reports should expose a **Why** view and a **How** view, with the how-to-repeat steps shown as knowledge candidates, not authorization.
+
 ## 8. Toolbox execution
 
 Toolbox components provide bounded evidence such as CPU, memory, disk, process, DNS, network, database, and queue diagnostics. Investigation may request tools based on policy, capability, and relevance.
@@ -156,6 +175,9 @@ Investigation state transitions and evidence access must be auditable. Repeated 
 9. How are investigation coverage, confidence, freshness, and completeness represented (ARCH-036)?
 10. What constitutes investigation completion, including inconclusive or abandoned outcomes, and who may close or reopen an investigation (ARCH-037)?
 11. Which lifecycle states and transitions are required, and how are human evidence, validation requests, and new contradictory evidence incorporated?
+12. What is the Why/How chain schema (link types, branching, cross-links between a How link and the Why gap it addresses)?
+13. How are temporary versus permanent mitigations classified and who confirms permanence?
+14. How are industry profiles defined and versioned without altering core evidence rules?
 
 ## 14. Dependencies
 

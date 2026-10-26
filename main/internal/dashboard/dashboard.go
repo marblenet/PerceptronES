@@ -51,9 +51,10 @@ type Recommendation struct {
 
 type dashboardReport struct {
 	report.CycleReport
-	Recommendation Recommendation `json:"recommendation"`
-	ToolActivity   *ToolActivity  `json:"tool_activity,omitempty"`
-	Configuration  *config.Config `json:"configuration,omitempty"`
+	Recommendation Recommendation            `json:"recommendation"`
+	ToolActivity   *ToolActivity             `json:"tool_activity,omitempty"`
+	Configuration  *config.Config            `json:"configuration,omitempty"`
+	LiveIncident   simulation.IncidentReport `json:"live_incident"`
 }
 
 func ListenLoopback(port int) (net.Listener, error) {
@@ -208,6 +209,7 @@ func (dashboard *Dashboard) handleReport(writer http.ResponseWriter, request *ht
 		Recommendation: recommend(*cycle),
 		ToolActivity:   activity,
 		Configuration:  configuration,
+		LiveIncident:   simulation.BuildLiveIncident(cycle.Runtime.CycleID, cycle.Runtime.Mission),
 	}
 	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	writer.Header().Set("Cache-Control", "no-store")
@@ -296,8 +298,9 @@ func (dashboard *Dashboard) handleSimulation(writer http.ResponseWriter, request
 		return
 	}
 	var input struct {
-		Scenario string            `json:"scenario"`
-		Inputs   simulation.Inputs `json:"inputs"`
+		Scenario    string            `json:"scenario"`
+		UseSnapshot bool              `json:"use_snapshot"`
+		Inputs      simulation.Inputs `json:"inputs"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 8192))
 	decoder.DisallowUnknownFields()
@@ -305,7 +308,34 @@ func (dashboard *Dashboard) handleSimulation(writer http.ResponseWriter, request
 		http.Error(writer, "invalid simulation request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	result, err := simulation.RunScenarioWithInputs(request.Context(), store.Current(), input.Scenario, input.Inputs)
+	var result simulation.Result
+	var err error
+	if input.UseSnapshot {
+		dashboard.mu.RLock()
+		var latest *report.CycleReport
+		if dashboard.latest != nil {
+			copy := *dashboard.latest
+			latest = &copy
+		}
+		dashboard.mu.RUnlock()
+		if latest == nil {
+			http.Error(writer, "no live assessment is available to snapshot yet", http.StatusServiceUnavailable)
+			return
+		}
+		var snapshot []model.Observation
+		for _, event := range latest.Runtime.Events {
+			if event.Type != model.TypeObservation {
+				continue
+			}
+			var observation model.Observation
+			if json.Unmarshal(event.Payload, &observation) == nil {
+				snapshot = append(snapshot, observation)
+			}
+		}
+		result, err = simulation.RunSnapshot(request.Context(), store.Current(), latest.Runtime.CycleID, snapshot, input.Inputs)
+	} else {
+		result, err = simulation.RunScenarioWithInputs(request.Context(), store.Current(), input.Scenario, input.Inputs)
+	}
 	if err != nil {
 		http.Error(writer, err.Error(), http.StatusBadRequest)
 		return
@@ -594,7 +624,7 @@ const indexHTML = `<!doctype html>
     @media(max-width:900px){.decision-grid{grid-template-columns:1fr}.decision-grid .hero{grid-template-columns:1fr auto}.tier-diagnosis,.tier-engines,.tier-components{width:100%}.config-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
     @media(max-width:780px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.hero{grid-template-columns:1fr auto;padding:22px}.section{padding:17px}}@media(max-width:540px){.shell{padding:24px 14px 40px}.top{align-items:flex-start}.connection{font-size:0}.connection .dot{flex:none}.hero{grid-template-columns:1fr}.badge{justify-self:start}.component-grid,.diagnosis-factors{grid-template-columns:1fr}.grid{gap:9px}.stat{padding:13px}.stat-value{font-size:16px}.section-head{align-items:flex-start;flex-direction:column}.action-btn{white-space:normal}.recommendation-head{flex-direction:column}.config-grid{grid-template-columns:1fr}}
     .page-nav{display:flex;gap:8px;margin:-12px 0 20px}.page-nav button{border:1px solid var(--line);border-radius:10px;padding:9px 14px;background:#111a2b;color:var(--muted);font:inherit;font-size:13px;cursor:pointer}.page-nav button[aria-current=page]{border-color:#6be3dc88;color:var(--cyan);background:#6be3dc12}.store-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.store-card{border:1px solid var(--line);border-radius:14px;padding:17px;background:#0d1524}.store-card h3{margin:0;font-size:15px}.store-card p{color:#b3c0d4;font-size:12px}.store-meta{display:flex;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:10px;margin-top:10px}.store-policy{font:11px ui-monospace,SFMono-Regular,Consolas,monospace;color:#c5d5eb;overflow-wrap:anywhere}.store-card button{margin-top:12px}.plugin-setting{display:grid;gap:6px;min-width:min(100%,360px);flex:1;color:#c5d5eb;font-size:11px}.plugin-setting textarea{width:100%;border:1px solid #3a4c67;border-radius:8px;background:#0b1220;color:var(--text);padding:9px;font:12px ui-monospace,SFMono-Regular,Consolas,monospace}
-    .simulation-inputs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.simulation-inputs label{display:grid;gap:6px;color:#b5c4da;font-size:11px}.simulation-inputs input{width:100%;min-width:0;border:1px solid #3a4c67;border-radius:8px;background:#0b1220;color:var(--text);padding:9px;font:inherit}.simulation-output{display:grid;gap:14px}.simulation-events{display:grid;gap:8px}.simulation-event{padding:11px;border:1px solid var(--line);border-radius:9px;background:#0d1524}.simulation-event code{display:block;margin-top:5px;color:var(--muted);font-size:10px}.simulation-factors{margin:8px 0;padding-left:20px}.simulation-report{overflow:auto;max-height:540px;padding:14px;background:#09111d;border:1px solid var(--line);border-radius:10px;font:11px ui-monospace,SFMono-Regular,Consolas,monospace;color:#c5d5eb}
+    .simulation-inputs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.simulation-inputs label{display:grid;gap:6px;color:#b5c4da;font-size:11px}.simulation-inputs input{width:100%;min-width:0;border:1px solid #3a4c67;border-radius:8px;background:#0b1220;color:var(--text);padding:9px;font:inherit}.simulation-output{display:grid;gap:14px}.simulation-events{display:grid;gap:8px}.simulation-event{padding:11px;border:1px solid var(--line);border-radius:9px;background:#0d1524}.simulation-event code{display:block;margin-top:5px;color:var(--muted);font-size:10px}.simulation-factors{margin:8px 0;padding-left:20px}.chain-tabs{display:flex;gap:6px;margin:12px 0 4px}.cascade{display:flex;gap:10px;align-items:stretch;overflow:auto;padding:4px 0}.cascade-layer{min-width:190px;flex:1;border:1px solid var(--line);padding:10px;background:#0b110d}.cascade-layer h4{margin:0 0 6px;color:var(--green);font-size:12px}.cascade-item{font:11px ui-monospace,Consolas,monospace;color:var(--muted);padding:2px 0;word-break:break-word}.cascade-arrow{align-self:center;color:var(--green)}.chain-tab{border:1px solid var(--line);background:transparent;color:var(--muted);padding:5px 14px;cursor:pointer;font:inherit}.chain-tab.active{color:var(--green);border-color:var(--green)}.simulation-report{overflow:auto;max-height:540px;padding:14px;background:#09111d;border:1px solid var(--line);border-radius:10px;font:11px ui-monospace,SFMono-Regular,Consolas,monospace;color:#c5d5eb}
     @media(max-width:900px){.simulation-inputs{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:540px){.simulation-inputs{grid-template-columns:1fr}}
     .planned-card{border-style:dashed;opacity:.86}.planned-status{display:inline-block;margin:9px 0 2px;padding:4px 8px;border:1px solid #f3bd6266;border-radius:999px;color:var(--amber);font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
     @media(max-width:540px){.store-grid{grid-template-columns:1fr}}
@@ -676,6 +706,8 @@ const indexHTML = `<!doctype html>
       <section class="tier tier-diagnosis">
         <div class="tier-label"><span class="tier-number">1</span> Root-cause assessment</div>
         <section class="section" aria-labelledby="diagnosis-heading"><div class="section-head"><div><h3 id="diagnosis-heading">What is driving this assessment?</h3><div class="section-sub">Leading evidence and contributing component states; not a causal claim beyond the available evidence</div></div></div><div id="diagnosis-summary" class="diagnosis-summary">Waiting for assessment evidence…</div><div id="diagnosis-factors" class="diagnosis-factors"></div><p class="diagnosis-footnote">Unknown is a valid result. GREEN requires complete, valid, fresh required evidence; missing or stale evidence is never healthy by default. Recommendations are not authorization, and this prototype's rule-based findings are not proof of root cause.</p></section>
+        <section class="section" aria-labelledby="cascade-heading"><div class="section-head"><div><h3 id="cascade-heading">Reasoning cascade (L1 → L6)</h3><div class="section-sub">Named layers L1 Metadata/Data, L2 Information, L3 Determination, L4 Assessment, L5 Incident Report, L6 Mitigation, then back to L5 for resolution/recurrence</div></div></div><div id="cascade-live" class="cascade"><div class="empty">Waiting for events…</div></div></section>
+        <section class="section" aria-labelledby="live-incident-heading"><div class="section-head"><div><h3 id="live-incident-heading">Incident reasoning: Why / How</h3><div class="section-sub">Derived from the current assessment only; unknowns stay unknown</div></div></div><div class="chain-tabs" role="tablist"><button type="button" id="livechain-why-tab" class="chain-tab active" role="tab">Why</button><button type="button" id="livechain-how-tab" class="chain-tab" role="tab">How</button></div><div id="livechain-why-panel"><h4>Why chain (backward causality)</h4><ol id="live-why" class="simulation-factors"></ol></div><div id="livechain-how-panel" hidden><h4>How chain (forward remediation)</h4><ol id="live-how" class="simulation-factors"></ol></div><p id="live-chain-note" class="diagnosis-footnote"></p></section>
       </section>
       <section class="tier tier-components">
         <div class="tier-label"><span class="tier-number">3</span> Components</div>
@@ -693,14 +725,15 @@ const indexHTML = `<!doctype html>
     <section id="settings-page" hidden><div class="page-title"><div><div class="header-label">Runtime controls</div><h2>Configuration</h2></div><button id="settings-back" class="secondary-btn" type="button">Back to operations</button></div></section>
     <section id="simulation-page" hidden>
       <section class="section"><div class="section-head"><div><h2>Simulation lab</h2><div class="section-sub">Explore deterministic synthetic conditions and alternate thresholds without affecting the live system.</div></div></div><p class="incident-note">Simulation runs in a fresh built-in-engine runtime using synthetic inputs. It does not read or write host state, run plugins, replace the live report, or authorize actions. Results are clearly labeled synthetic and are not production observations.</p>
-        <div class="config-actions"><label for="simulation-scenario">Scenario</label><select id="simulation-scenario"><option value="normal">Normal baseline</option><option value="cpu-warning">Elevated CPU pressure</option><option value="cpu-critical">Critical CPU pressure</option><option value="missing-memory">Missing memory evidence</option><option value="stale-memory">Stale memory evidence</option><option value="security-critical">Security finding: critical</option></select></div>
+        <div class="config-actions"><label for="simulation-scenario">Scenario</label><select id="simulation-scenario"><option value="normal">Normal baseline</option><option value="cpu-warning">Elevated CPU pressure</option><option value="cpu-critical">Critical CPU pressure</option><option value="missing-memory">Missing memory evidence</option><option value="stale-memory">Stale memory evidence</option><option value="security-critical">Security finding: critical</option></select><label for="sim-snapshot"><input id="sim-snapshot" type="checkbox"> Fork from live snapshot (latest live observations; scenario and synthetic measurements ignored, thresholds apply)</label></div>
         <fieldset class="engine-settings"><legend>Synthetic measurements</legend><div class="simulation-inputs"><label>CPU utilization (%)<input id="sim-cpu" type="number" min="0" max="100" step="0.1" value="20"></label><label>Memory used (%)<input id="sim-memory" type="number" min="0" max="100" step="0.1" value="40"></label><label>Load per CPU<input id="sim-load" type="number" min="0" step="0.1" value="0.5"></label><label>Filesystem used (%)<input id="sim-filesystem" type="number" min="0" max="100" step="0.1" value="50"></label></div></fieldset>
         <fieldset class="engine-settings"><legend>Simulation thresholds (warning / critical)</legend><div class="simulation-inputs"><label>CPU (%)<input id="sim-cpu-warning" type="number" min="0" max="100" step="0.1" value="85"><input id="sim-cpu-critical" type="number" min="0" max="100" step="0.1" value="95"></label><label>Memory (%)<input id="sim-memory-warning" type="number" min="0" max="100" step="0.1" value="85"><input id="sim-memory-critical" type="number" min="0" max="100" step="0.1" value="95"></label><label>Filesystem (%)<input id="sim-filesystem-warning" type="number" min="0" max="100" step="0.1" value="85"><input id="sim-filesystem-critical" type="number" min="0" max="100" step="0.1" value="95"></label><label>Load per CPU<input id="sim-load-warning" type="number" min="0" step="0.1" value="1.5"><input id="sim-load-critical" type="number" min="0" step="0.1" value="3"></label></div></fieldset>
         <div class="config-actions"><button id="run-simulation" class="action-btn" type="button">Run isolated simulation</button><span id="simulation-status" class="section-sub" role="status">No simulation has been run.</span></div>
       </section>
       <div id="simulation-output" class="simulation-output" hidden>
-        <section class="section"><div class="section-head"><div><h3 id="simulation-incident-title">Synthetic incident report</h3><div id="simulation-incident-status" class="section-sub"></div></div></div><p id="simulation-incident-summary" class="diagnosis-summary"></p><h4>Contributing factors</h4><ul id="simulation-factors" class="simulation-factors"></ul><h4>Missing evidence</h4><ul id="simulation-missing" class="simulation-factors"></ul><h4>Suggested response</h4><ul id="simulation-recommendations" class="simulation-factors"></ul></section>
+        <section class="section"><div class="section-head"><div><h3 id="simulation-incident-title">Synthetic incident report</h3><div id="simulation-incident-status" class="section-sub"></div></div></div><p id="simulation-incident-summary" class="diagnosis-summary"></p><h4>Contributing factors</h4><ul id="simulation-factors" class="simulation-factors"></ul><h4>Missing evidence</h4><ul id="simulation-missing" class="simulation-factors"></ul><h4>Suggested response</h4><ul id="simulation-recommendations" class="simulation-factors"></ul><div class="chain-tabs" role="tablist"><button type="button" id="chain-why-tab" class="chain-tab active" role="tab">Why</button><button type="button" id="chain-how-tab" class="chain-tab" role="tab">How</button></div><div id="chain-why-panel"><h4>Why chain (backward causality)</h4><ol id="simulation-why" class="simulation-factors"></ol></div><div id="chain-how-panel" hidden><h4>How chain (forward remediation)</h4><ol id="simulation-how" class="simulation-factors"></ol></div><p id="simulation-chain-note" class="diagnosis-footnote"></p></section>
         <section class="section"><div class="section-head"><div><h3>All synthetic events</h3><div id="simulation-event-meta" class="section-sub"></div></div></div><div id="simulation-events" class="simulation-events"></div></section>
+        <section class="section"><div class="section-head"><div><h3>Synthetic reasoning cascade</h3><div class="section-sub">Same derivation-depth view as the live page, for this simulation only</div></div></div><div id="cascade-sim" class="cascade"></div></section>
         <section class="section"><div class="section-head"><div><h3>Complete simulation report</h3><div class="section-sub">Includes inputs, incident summary, assessments, runtime metrics, and event payloads.</div></div></div><pre id="simulation-report" class="simulation-report"></pre></section>
       </div>
     </section>
@@ -794,6 +827,7 @@ const indexHTML = `<!doctype html>
     byId("security-tab").addEventListener("click",()=>showPage("security"));
     byId("simulation-tab").addEventListener("click",()=>showPage("simulation"));
     byId("store-tab").addEventListener("click",()=>showPage("store"));
+    bindChainTabs("chain");bindChainTabs("livechain");
     byId("settings-tab").addEventListener("click",()=>showPage("settings"));
     byId("settings-back").addEventListener("click",()=>showPage("operations"));
     byId("alert-security").addEventListener("click",()=>showPage("security"));
@@ -996,7 +1030,42 @@ const indexHTML = `<!doctype html>
         byId("event-list").append(item);
       });
     }
+    function renderChains(incident, whyId, howId, noteId) {
+      [[whyId,incident.why_chain],[howId,incident.how_chain]].forEach(([id,links])=>{
+        const list=byId(id);clear(list);
+        if(!links||!links.length){list.append(text("li","","None reported."));return;}
+        links.forEach(link=>list.append(text("li","",link.statement+" ["+String(link.status||"unknown").toUpperCase()+(link.class?" · "+link.class:"")+" · origin: "+(link.origin||"unknown")+(link.evidence&&link.evidence.length?" · evidence: "+link.evidence.join(", "):"")+"]")));
+      });
+      byId(noteId).textContent=incident.chain_note||"";
+    }
+    function renderCascade(events, targetId, incident) {
+      const target=byId(targetId);clear(target);
+      if(!events||!events.length){target.append(text("div","empty","No events available."));return;}
+      const layerOf={"observation.host.v1":1,"observation.security.v1":1,"assessment.cycle.started.v1":1,"pressure.host.v1":2,"health.host.v1":3,"security.finding.v1":3,"mission.host.v1":4};
+      const names={1:"L1 · Metadata / Data",2:"L2 · Information",3:"L3 · Determination",4:"L4 · Assessment",0:"Unmapped event types"};
+      const layers={};events.forEach(event=>{const d=layerOf[event.type]||0;(layers[d]=layers[d]||[]).push(event);});
+      const addColumn=(title,lines)=>{
+        if(target.children.length)target.append(text("div","cascade-arrow","→"));
+        const column=text("div","cascade-layer","");column.append(text("h4","",title));
+        lines.forEach(line=>column.append(text("div","cascade-item",line)));target.append(column);
+      };
+      [1,2,3,4,0].forEach(d=>{
+        if(!layers[d]){if(d)addColumn(names[d],["No events at this layer."]);return;}
+        const counts={};
+        layers[d].forEach(event=>{const key=event.source+" → "+event.type+" ["+event.origin+"]";counts[key]=(counts[key]||0)+1;});
+        addColumn(names[d],Object.keys(counts).map(key=>key+(counts[key]>1?" ×"+counts[key]:"")));
+      });
+      const inc=incident||{};
+      addColumn("L5 · Incident Report",[(inc.title||"Not assessed")+" · "+(inc.status||"UNKNOWN"),"Why / How chains: see Incident reasoning"]);
+      addColumn("L6 · Mitigation",["Recommendation only; no mitigation executed or recorded","Not authorization"]);
+      addColumn("↺ L5 · Resolution or recurrence",["UNKNOWN: not tracked in this build"]);
+    }
+    function bindChainTabs(prefix) {
+      [["why","how"],["how","why"]].forEach(([on,off])=>byId(prefix+"-"+on+"-tab").addEventListener("click",()=>{byId(prefix+"-"+on+"-panel").hidden=false;byId(prefix+"-"+off+"-panel").hidden=true;byId(prefix+"-"+on+"-tab").classList.add("active");byId(prefix+"-"+off+"-tab").classList.remove("active");}));
+    }
     function render(data) {
+      renderCascade((data.runtime||{}).events||[],"cascade-live",data.live_incident);
+      renderChains(data.live_incident||{},"live-why","live-how","live-chain-note");
       const runtime = data.runtime || {};
       const mission = runtime.mission || {scope:{type:"host",id:data.host_id},objective:"Core mission assessment unavailable",status:"UNKNOWN",disposition:"unable_to_assess",explanation:"The core is collecting observations, but its mission assessment is unavailable.",components:[],coverage:{assessed_components:[],required_components:[],complete:false},freshness:"not_assessed"};
       const status = mission.status || "UNKNOWN";
@@ -1022,11 +1091,13 @@ const indexHTML = `<!doctype html>
         :"The security-posture engine is not enabled and no security findings are available. This is not a security clearance.";
       byId("stats").append(
         stat("Mission status",status,mission.disposition || "No disposition"),
-        stat("Assessment coverage",String((mission.coverage && mission.coverage.assessed_components || []).length) + " / " + String((mission.coverage && mission.coverage.required_components || []).length),mission.coverage && mission.coverage.complete ? "All required scopes represented" : "Coverage incomplete"),
-        stat("Evidence freshness",mission.freshness || "unknown","Freshness is distinct from coverage"),
-        stat("Observations",String(data.available_observations || 0) + " available",String(data.unavailable_observations || 0) + " unavailable"),
+        stat("Active incidents", status === "RED" ? "1 critical" : (status === "YELLOW" ? "1 elevated" : "0"), status === "UNKNOWN" ? "Assessment incomplete" : "Derived from current mission status"),
+        stat("Assessment coverage", String((mission.coverage && mission.coverage.assessed_components || []).length) + " / " + String((mission.coverage && mission.coverage.required_components || []).length), mission.coverage && mission.coverage.complete ? "All required scopes represented" : "Coverage incomplete"),
+        stat("Confidence", "Not modeled", "Deterministic rules currently report evidence, coverage, and freshness instead"),
+        stat("Evidence freshness", mission.freshness || "unknown", "Freshness is distinct from coverage"),
+        stat("Observations", String(data.available_observations || 0) + " available", String(data.unavailable_observations || 0) + " unavailable"),
         engineStat(metrics)
-      );
+      )
       const securityCard=stat("Security posture",securityStatus,securityFindings.length?securityFindings.length+" finding(s) · review separately":"Not assessed · not a clearance");
       securityCard.classList.add("stat-link");
       securityCard.tabIndex=0;
@@ -1112,6 +1183,13 @@ const indexHTML = `<!doctype html>
         if(!items||!items.length){list.append(text("li","","None reported."));return;}
         items.forEach(item=>list.append(text("li","",item)));
       });
+      [["simulation-why",incident.why_chain],["simulation-how",incident.how_chain]].forEach(([id,links])=>{
+        const list=byId(id);clear(list);
+        if(!links||!links.length){list.append(text("li","","None reported."));return;}
+        links.forEach(link=>list.append(text("li","",link.statement+" ["+String(link.status||"unknown").toUpperCase()+(link.class?" · "+link.class:"")+" · origin: "+(link.origin||"unknown")+(link.evidence&&link.evidence.length?" · evidence: "+link.evidence.join(", "):"")+"]")));
+      });
+      byId("simulation-chain-note").textContent=incident.chain_note||"";
+      renderCascade(events,"cascade-sim",incident);
       byId("simulation-event-meta").textContent="Synthetic cycle "+(cycle.cycle_id||"unknown")+" · "+events.length+" events · all events below are generated from synthetic input.";
       const eventList=byId("simulation-events");clear(eventList);
       if(!events.length)eventList.append(text("div","empty","No events were emitted."));
@@ -1127,7 +1205,7 @@ const indexHTML = `<!doctype html>
       const button=byId("run-simulation");button.disabled=true;
       const status=byId("simulation-status");status.textContent="Running an isolated synthetic cycle…";
       try{
-        const response=await fetch("/api/simulate",{method:"POST",headers:{"Content-Type":"application/json","X-Requested-With":"PerceptronDashboard"},body:JSON.stringify({scenario:byId("simulation-scenario").value,inputs:simulationInput()}),cache:"no-store"});
+        const response=await fetch("/api/simulate",{method:"POST",headers:{"Content-Type":"application/json","X-Requested-With":"PerceptronDashboard"},body:JSON.stringify({scenario:byId("simulation-scenario").value,use_snapshot:byId("sim-snapshot").checked,inputs:(()=>{const inputs=simulationInput();if(byId("sim-snapshot").checked){delete inputs.cpu_percent;delete inputs.memory_percent;delete inputs.load_per_cpu;delete inputs.filesystem_percent;}return inputs;})()}),cache:"no-store"});
         if(!response.ok)throw new Error((await response.text())||"Simulation failed ("+response.status+")");
         const result=await response.json();renderSimulation(result);status.textContent="Simulation complete · synthetic only · live report unchanged.";
       }catch(error){status.textContent="Simulation failed: "+(error.message||"unknown error");}

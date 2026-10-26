@@ -27,6 +27,7 @@ The implementation should progressively demonstrate that Perceptron SRE can:
 ## 3. Implementation principles
 
 - **Prove the smallest useful system first.** Begin with a single Go binary on one Linux host. Do not start with DNS federation, autonomous remediation, or an AI/ML subsystem.
+- **Document before implementation.** Update architecture docs, RFCs, engineering memos, and implementation guides before introducing behavior changes.
 - **Observe before acting.** Early phases collect, derive, explain, and recommend; they do not execute production changes.
 - **Keep the DNS fast path independent.** Analytical workloads and metadata consumers must not block DNS responses.
 - **Preserve uncertainty.** Missing, stale, contradictory, partial, or unavailable inputs remain visible and cannot become healthy or authorized results by default.
@@ -157,6 +158,27 @@ Collect a bounded set of host signals:
 
 Every observation records its source and time. Unsupported collectors or unavailable targets produce visible unavailable/unsupported results, not zero-valued healthy measurements.
 
+**Host metric catalog (implemented 2026-10-28).** `main/internal/metrics` defines 50 host metrics (the original 7 plus 43 extended) as the single source of truth for name, component, unit, range, and default threshold:
+
+| Group | Metrics |
+|---|---|
+| CPU (7) | utilization, iowait, steal, system, count, context switches/s, running processes |
+| Load (3) | 1m, 5m, 15m |
+| Memory (10) | used %, total, available, dirty, commit %, swap used %, swap in/out pages/s, major faults/s, OOM kills |
+| Pressure/PSI (3) | cpu, memory, io `some avg10` |
+| Filesystem (4, per path) | used %, inodes used %, available bytes, read-only |
+| Disk I/O (5) | read/write bytes/s, read/write IOPS, busiest-disk utilization % |
+| Network (10) | rx/tx bytes, errors, drops, rx/tx bytes/s, interfaces up, TCP established, TCP retransmits/s, conntrack % |
+| System (8) | process count, zombies, blocked, threads, file descriptors %, PID %, uptime, kernel tainted |
+
+Rules:
+
+- Sources are only `/proc` and `/sys`, with no external commands. Rates use the two samples taken around the CPU sample interval (default 250 ms), so they are short-window and noisy; treat them as indicative.
+- A missing source (PSI, conntrack, `oom_kill`, restricted `/proc`) yields unavailable observations with a reason, never zero.
+- Extended metrics use their own components and are *advisory*: Warning/Critical raises the mission to YELLOW/RED, but an unavailable advisory metric does not make the mission UNKNOWN. Required coverage remains cpu, memory, load, filesystem (plus DNS/security when configured).
+- Defaults for thresholded extended metrics come from the catalog and can be overridden with `metric_thresholds` in configuration.
+- Target platform is Oracle Linux 9; development runs on WSL Ubuntu. Verified so far: Linux cross-build and a run on WSL1, where many sources are absent and reported unavailable. Not yet verified on Oracle Linux 9.
+
 #### 1.4 Reasoning cascade
 
 Implement the baseline cascade, plus optional security evidence when its engine is enabled:
@@ -234,6 +256,7 @@ Introduce the minimum entity references needed for the lab: service, region (eve
 - Introduce a small, reviewed knowledge corpus with provenance and applicability metadata.
 - Make absent knowledge distinct from retrieval failure.
 - Do not automatically execute runbooks or mutate DNS configuration.
+- Incident reports carry a Why chain and a How chain (RFC-0008 section 7.1, D-13). Prototype status: simulation and live dashboard views expose evidence-linked chains derived from the current assessment, with temporary/permanent class `unclassified` and unknown root cause/recovery. Also implemented: a derivation-depth cascade view and snapshot-forked simulation (live host observations, simulation origin). Not implemented: incident history chains, confidence on links, human_action How evidence, knowledge promotion, engine-class labels in the cascade view.
 
 #### 2.5 Twin design rehearsal
 

@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"perceptronsre/internal/metrics"
 )
 
 type Threshold struct {
@@ -24,17 +26,18 @@ type Thresholds struct {
 }
 
 type Config struct {
-	HostID                 string             `json:"host_id"`
-	FilesystemPaths        []string           `json:"filesystem_paths"`
-	DNSProbeName           string             `json:"dns_probe_name,omitempty"`
-	DNSProbeTimeout        string             `json:"dns_probe_timeout"`
-	CPUSampleInterval      string             `json:"cpu_sample_interval"`
-	MaxObservationAge      string             `json:"max_observation_age"`
-	Thresholds             Thresholds         `json:"thresholds"`
-	Engines                []string           `json:"engines"`
-	Plugins                []Plugin           `json:"plugins,omitempty"`
-	SecurityRequiredChecks []string           `json:"security_required_checks,omitempty"`
-	SecurityEvidence       []SecurityEvidence `json:"security_evidence,omitempty"`
+	HostID                 string               `json:"host_id"`
+	FilesystemPaths        []string             `json:"filesystem_paths"`
+	DNSProbeName           string               `json:"dns_probe_name,omitempty"`
+	DNSProbeTimeout        string               `json:"dns_probe_timeout"`
+	CPUSampleInterval      string               `json:"cpu_sample_interval"`
+	MaxObservationAge      string               `json:"max_observation_age"`
+	Thresholds             Thresholds           `json:"thresholds"`
+	MetricThresholds       map[string]Threshold `json:"metric_thresholds,omitempty"`
+	Engines                []string             `json:"engines"`
+	Plugins                []Plugin             `json:"plugins,omitempty"`
+	SecurityRequiredChecks []string             `json:"security_required_checks,omitempty"`
+	SecurityEvidence       []SecurityEvidence   `json:"security_evidence,omitempty"`
 }
 
 type SecurityEvidence struct {
@@ -157,6 +160,17 @@ func (cfg Config) Validate() error {
 		math.IsNaN(load.Critical) || math.IsInf(load.Critical, 0) ||
 		load.Warning <= 0 || load.Critical <= load.Warning {
 		return errors.New("load_per_cpu threshold must satisfy 0 < warning < critical")
+	}
+	for name, threshold := range cfg.MetricThresholds {
+		def, ok := metrics.Lookup(name)
+		if !ok || !def.Thresholded {
+			return fmt.Errorf("metric_thresholds: %q is not a thresholdable catalog metric", name)
+		}
+		if math.IsNaN(threshold.Warning) || math.IsInf(threshold.Warning, 0) ||
+			math.IsNaN(threshold.Critical) || math.IsInf(threshold.Critical, 0) ||
+			threshold.Warning < 0 || threshold.Warning > threshold.Critical || (def.Percent && threshold.Critical > 100) {
+			return fmt.Errorf("metric_thresholds[%q] must satisfy 0 <= warning <= critical (and <= 100 for percent metrics)", name)
+		}
 	}
 	knownEngines := map[string]bool{
 		"host-pressure":    true,

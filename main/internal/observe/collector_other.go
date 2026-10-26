@@ -1,3 +1,4 @@
+//go:build !linux
 // +build !linux
 
 package observe
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"perceptronsre/internal/config"
+	"perceptronsre/internal/metrics"
 	"perceptronsre/internal/model"
 )
 
@@ -30,6 +32,17 @@ func collectHost(ctx context.Context, cfg config.Config) ([]model.Observation, e
 		item := observation("filesystem.used_percent", "filesystem", "percent", nil, reason, now)
 		item.ScopeID = pathpkg.Clean(filesystemPath)
 		observations = append(observations, item)
+	}
+	for _, def := range metrics.Extended() {
+		if def.Scoped {
+			for _, filesystemPath := range cfg.FilesystemPaths {
+				item := observation(def.Name, def.Component, def.Unit, nil, reason, now)
+				item.ScopeID = pathpkg.Clean(filesystemPath)
+				observations = append(observations, item)
+			}
+			continue
+		}
+		observations = append(observations, observation(def.Name, def.Component, def.Unit, nil, reason, now))
 	}
 	if cfg.DNSProbeName != "" {
 		probe, err := probeDNS(ctx, cfg)

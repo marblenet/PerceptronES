@@ -18,6 +18,34 @@ Tap engines observe, capture, normalize, and publish facts. They do not interpre
 
 Domain and category identifiers are extensible data, not a closed set in core code. Initial examples include `host.health`, `host.resources`, `host.security`, `process`, `application`, `database`, `dns`, `network`, `mission`, `policy`, and `simulation`; new domains must not require redesign. Names such as `weather.sleet` and `space.deep_space_link` are valid illustrative extensions.
 
+### Reasoning layers (L1–L6)
+
+Dashboards and reports name the forward-only cascade with these layers:
+
+| Layer | Name | Meaning | Current event types |
+|---|---|---|---|
+| L1 | Metadata / Data | Raw observations and cycle context | `observation.host.v1`, `observation.security.v1`, `assessment.cycle.started.v1` |
+| L2 | Information | Data interpreted into measures | `pressure.host.v1` |
+| L3 | Determination | Per-component health/finding judgments | `health.host.v1`, `security.finding.v1` |
+| L4 | Assessment | Scoped mission assessment | `mission.host.v1` |
+| L5 | Incident Report | Why/How incident record (RFC-0008 7.1) | derived view only; no events |
+| L6 | Mitigation | Recommended/executed mitigation | recommendations only; none executed or recorded |
+
+After L6, the loop returns to **L5 Incident Report** to record resolution or recurrence. This return is not implemented: resolution/recurrence is shown as Unknown. Unmapped plugin event types are shown as "Unmapped" rather than guessed into a layer. Layer names are presentation labels, not new event contracts.
+
+### Cascade engine classes
+
+The platform distinguishes engine classes so contributors can reason about where logic belongs:
+
+- **Tap engines:** collect, normalize, and publish observed facts.
+- **Layer-1 perceptrons:** convert observed metadata/signals into intermediate information.
+- **Layer-2 perceptrons:** convert information into determinations.
+- **Assessment engines:** convert determinations into health/impact/mission/security assessments.
+- **Recommendation engines:** convert assessments into suggested mitigations and investigation paths.
+- **Policy engines:** determine authorization boundaries for any potential action.
+
+Tap engines must not publish interpreted assessments, recommendations, or actions.
+
 ## Contributor contract and engine proof
 
 Every engine package should document:
@@ -54,6 +82,10 @@ Simulation and dry run are different workflows:
 Snapshot simulation should eventually support capture, immutable snapshot identity, explicit overrides, and rerun through the reasoning pipeline. Every result should show its baseline, overrides, configuration/engine versions, output, and provenance. Production snapshots require data minimization, access controls, retention rules, and clear separation from live streams.
 
 Simulation must be isolated from production action adapters by construction. A human override is not an automatic grant: it requires authenticated identity, authorization, reason, incident reference, explicit scope, and durable audit, and produces a human-action event. The authority and emergency semantics remain open in RFC-0010. Human engineers remain accountable decision-makers; the system observes, reasons, explains, recommends, validates, and escalates.
+
+## Plugin ecosystem direction
+
+Everything outside the core runtime trends toward plugin-style packaging over time. That includes reasoning engines, taps, simulation bundles, and future dashboard/knowledge extensions. Contributor burden should stay centered on declaring inputs, outputs, purpose, tests, and simulation fixtures; core services continue to own registration lifecycle, runtime governance, visualization contracts, and storage interfaces.
 
 ## Adoption and acceptance gates
 
