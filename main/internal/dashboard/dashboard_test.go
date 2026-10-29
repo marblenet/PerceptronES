@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -74,7 +75,7 @@ func TestDashboardServesPageAndLatestReport(t *testing.T) {
 		!strings.Contains(pageHTML, "Suggested Mitigation Window") ||
 		!strings.Contains(pageHTML, "Reasoning engines") ||
 		!strings.Contains(pageHTML, "Runtime configuration") ||
-		!strings.Contains(pageHTML, "Engine Store") ||
+		!strings.Contains(pageHTML, "store-layer-filters") ||
 		!strings.Contains(pageHTML, "Available core capabilities") ||
 		!strings.Contains(pageHTML, "Security posture engine") ||
 		!strings.Contains(pageHTML, "data-capability=\"security-posture\"") ||
@@ -101,7 +102,7 @@ func TestDashboardServesPageAndLatestReport(t *testing.T) {
 		!strings.Contains(pageHTML, "Unknown is a valid result") ||
 		!strings.Contains(pageHTML, "GREEN requires complete, valid, fresh required evidence") ||
 		!strings.Contains(pageHTML, "Event_ID: ") ||
-		!strings.Contains(pageHTML, "Reasoning cascade (L1") ||
+		!strings.Contains(pageHTML, "Reasoning cascade (Layer-0") ||
 		!strings.Contains(pageHTML, "Fork from live snapshot") ||
 		!strings.Contains(pageHTML, "live-why") ||
 		!strings.Contains(pageHTML, "Why chain (backward causality)") ||
@@ -194,7 +195,7 @@ func TestEngineCatalogIncludesBuiltInsAndPolicy(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&entries); err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 3 || entries[0].Name != "host-pressure" || entries[0].Policy.Mode != "reasoning_only" || entries[2].Name != "security-posture" {
+	if len(entries) != 9 || entries[0].Name != "host-pressure" || entries[0].Policy.Mode != "reasoning_only" || entries[1].Name != "host-determination" || entries[8].Name != "security-posture" {
 		t.Fatalf("catalog is missing built-in engine policy metadata: %#v", entries)
 	}
 }
@@ -392,7 +393,7 @@ func TestDashboardLoadsAndUpdatesConfiguration(t *testing.T) {
 	if err := json.NewDecoder(get.Body).Decode(&loaded); err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded.Engines) != 2 {
+	if len(loaded.Engines) != 8 {
 		t.Fatalf("expected default built-in engine set, got %#v", loaded.Engines)
 	}
 
@@ -550,5 +551,46 @@ func testCycleReport(t *testing.T) report.CycleReport {
 			Mission:     mission,
 			Events:      []model.Event{},
 		},
+	}
+}
+
+func TestNonLoopbackHostAllowlistAndConfigWrites(t *testing.T) {
+	listener := &net.TCPAddr{IP: net.ParseIP("10.0.0.5"), Port: 8080}
+	got := AllowedHostsFor(listener, []string{"203.0.113.10"})
+	want := []string{"10.0.0.5:8080", "203.0.113.10:8080"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("AllowedHostsFor() = %#v, want %#v", got, want)
+	}
+
+	dashboard := New()
+	if err := dashboard.SetAllowedHost("10.0.0.5:8080"); err != nil {
+		t.Fatal(err)
+	}
+	dashboard.SetExtraAllowedHosts(got)
+	handler := dashboard.Handler()
+	for host, wantStatus := range map[string]int{
+		"203.0.113.10:8080": http.StatusServiceUnavailable,
+		"evil.example:8080":   http.StatusForbidden,
+	} {
+		request := httptest.NewRequest(http.MethodGet, "http://"+host+"/healthz", nil)
+		request.Host = host
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if wantStatus == http.StatusServiceUnavailable && response.Code == http.StatusForbidden {
+			t.Errorf("Host %q was unexpectedly forbidden", host)
+		} else if wantStatus == http.StatusForbidden && response.Code != wantStatus {
+			t.Errorf("Host %q: expected %d, got %d", host, wantStatus, response.Code)
+		}
+	}
+
+	dashboard.SetConfigWritesDisabled(true)
+	request := httptest.NewRequest(http.MethodPut, "http://203.0.113.10:8080/api/config", nil)
+	request.Host = "203.0.113.10:8080"
+	request.Header.Set("X-Requested-With", "PerceptronDashboard")
+	request.Header.Set("Origin", "http://203.0.113.10:8080")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("disabled config write returned %d, want %d", response.Code, http.StatusForbidden)
 	}
 }

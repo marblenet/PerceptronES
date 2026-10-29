@@ -30,6 +30,7 @@ Operational reasoning benefits from prior incidents and successful procedures, b
 - Preserve near misses as learning material.
 - Close the learning loop from incidents and investigations through validation and outcomes to reviewed knowledge updates.
 - Support converting reviewed incidents and near misses into reproducible regression scenarios without automatically promoting procedures or claims.
+- Provide a Knowledge Store with Core, Local, and Community sources, operator-configured source weights, and determination patterns that interpret metric combinations, prioritized ahead of additional Tap Engines (6.3).
 
 ## 4. Non-goals
 
@@ -92,6 +93,25 @@ Where an incident or near miss becomes a regression scenario, preserve its sourc
 ### 6.2 Why/How chains as knowledge input (Proposed)
 
 A completed incident's Why chain (how to recognize the problem) and How chain (how it was mitigated, and why that worked) are candidate inputs for knowledge items, runbooks, simulation scenarios, and regression tests. Knowledge derived from them must keep links to the source incident, evidence, mitigation class (temporary or permanent), and review status. Temporary mitigations must not be recorded as prevention. Promotion to approved knowledge requires review per section 6; a successful past mitigation does not establish that it is safe or applicable now.
+
+### 6.3 Knowledge Store, Core/Local/Community sources, and determination patterns
+
+The Knowledge Store is a first-class subsystem that translates information, determinations, and historical experience into assessments. **Knowledge creation takes priority over additional Tap Engines:** metrics become assessments only when combinations of observations are interpreted ("what do combinations of metrics mean?"). The target is common operational patterns, not exhaustive combinations (50! is computationally impossible and operationally useless). Examples: high CPU with normal memory and disk may be expected processing load; low CPU and network with high disk wait may be a storage bottleneck.
+
+**Sources.** Knowledge comes from **Core** (Perceptron engineering: default assessments, patterns, and operational experience), **Local** (operators and organizations: company-specific systems, custom policies, historical knowledge), and **Community** (pull requests, Knowledge Store packages, contributions). Operators configure trust preferences as relative weights, for example Core 60 / Local 30 / Community 10, or Core 20 / Local 70 / Community 10. Assessments preserve provenance, source, coverage, and confidence where defined when sources disagree.
+
+**Community governance.** Votes, reviews, comments, and confidence signals may influence review and visibility, but popularity is not truth: community voting never becomes production behavior automatically, and community knowledge follows the same review and provenance rules as any knowledge item.
+
+**Initial domains** (priority order): CPU (saturation, runaway processes, normal utilization); memory (pressure, swapping, leaks, cache growth); storage (saturation, latency, full, inode exhaustion); network (congestion, packet loss, bandwidth saturation, connection storms); services (restart loops, crashes, dependency failures); security (missing patches, critical CVEs, expired certificates, unsupported software).
+
+**Prototype semantics (implemented).**
+- A determination pattern has `all` and optional `any` conditions over cataloged metrics (`>=`, `>`, `<`, `elevated`, `normal`); `elevated` and `normal` apply only to metrics the pressure engine evaluates. A pattern may carry a recommendation.
+- Unavailable, stale, or missing evidence never matches: unknown is neither a match nor health. Critical evidence raises a WARNING pattern to CRITICAL. Each determination cites its evidence events, knowledge source, and weight.
+- Core patterns use IDs `core.<domain>.<name>` (19 shipped: CPU, memory, storage, partial network, system limits). Local patterns (`knowledge.local_patterns`) and community patterns (`knowledge.community_patterns`) use the same format; `knowledge.disabled_patterns` removes patterns.
+- `knowledge.weights` are relative values normalized to percent (default Core 30 / Local 60 / Community 10). When sources define the same pattern ID, the highest-weight source wins (ties: local, core, community); a zero weight ignores a source and all-zero weights select the defaults. The weight is a source-precedence rule, not a confidence value (RFC-0004).
+- Not implemented: Services patterns (no inputs yet), Security patterns over host metrics, package distribution and signing, voting and review workflow, and feeding determinations into Layer-3 health and mission. Rate-based patterns use short two-sample rates and are noisy. Absence of a determination is not evidence of health.
+
+Knowledge configuration is version-controlled operational knowledge: weights, thresholds, and store priorities must be auditable, reproducible, and reviewable, and the system changes only when humans change configuration, knowledge, or code.
 
 ## 7. Trust model
 
@@ -179,6 +199,8 @@ Runbooks may contain privileged commands or sensitive operational details. Retri
 10. How are conflicting, superseded, or invalidated knowledge items represented and retained (ARCH-039)?
 11. How are knowledge gaps distinguished from empty results, incomplete coverage, access restriction, retrieval failure, and unavailable sources (ARCH-040)?
 12. What lifecycle states and transitions apply, and how do lifecycle status, approval, and trust relate?
+13. How are Core/Local/Community packages distributed, signed, reviewed, and versioned, and how are community votes used for review only (6.3)?
+14. When do determinations feed Layer-3 assessments, and which Services and Security patterns are first?
 
 ## 15. Dependencies
 

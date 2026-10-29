@@ -25,7 +25,10 @@ type Dashboard struct {
 	toolActivity    *ToolActivity
 	refreshRequests chan<- ToolActivity
 	allowedHost     string
+	extraHosts      map[string]bool
 	configStore     *config.Store
+
+	configWritesDisabled bool
 }
 
 type ToolActivity struct {
@@ -58,14 +61,70 @@ type dashboardReport struct {
 }
 
 func ListenLoopback(port int) (net.Listener, error) {
+	return Listen("127.0.0.1", port)
+}
+
+// Listen binds the dashboard to a literal IP address.
+func Listen(address string, port int) (net.Listener, error) {
 	if port < 0 || port > 65535 {
 		return nil, fmt.Errorf("dashboard port must be between 0 and 65535, got %d", port)
 	}
-	listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	if net.ParseIP(address) == nil {
+		return nil, fmt.Errorf("dashboard listen address %q must be a literal IP address", address)
+	}
+	listener, err := net.Listen("tcp", net.JoinHostPort(address, strconv.Itoa(port)))
 	if err != nil {
-		return nil, fmt.Errorf("listen on dashboard loopback address: %w", err)
+		return nil, fmt.Errorf("listen on dashboard address %s: %w", address, err)
 	}
 	return listener, nil
+}
+
+// AllowedHostsFor returns the Host header values accepted for a listener: its
+// own address, the local interface addresses when bound to an unspecified
+// address, and any operator-declared names (given without a port, the
+// listener's port is assumed).
+func AllowedHostsFor(addr net.Addr, extra []string) []string {
+	host, port, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return nil
+	}
+	hosts := []string{}
+	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
+		if addrs, err := net.InterfaceAddrs(); err == nil {
+			for _, item := range addrs {
+				if network, ok := item.(*net.IPNet); ok {
+					hosts = append(hosts, net.JoinHostPort(network.IP.String(), port))
+				}
+			}
+		}
+	} else {
+		hosts = append(hosts, addr.String())
+	}
+	for _, name := range extra {
+		if _, _, err := net.SplitHostPort(name); err != nil {
+			name = net.JoinHostPort(strings.Trim(name, "[]"), port)
+		}
+		hosts = append(hosts, name)
+	}
+	return hosts
+}
+
+// SetExtraAllowedHosts accepts additional Host header values.
+func (dashboard *Dashboard) SetExtraAllowedHosts(hosts []string) {
+	dashboard.mu.Lock()
+	dashboard.extraHosts = make(map[string]bool, len(hosts))
+	for _, host := range hosts {
+		dashboard.extraHosts[strings.ToLower(host)] = true
+	}
+	dashboard.mu.Unlock()
+}
+
+// SetConfigWritesDisabled makes PUT /api/config return 403. It is used for
+// non-loopback listeners, which have no authentication of their own.
+func (dashboard *Dashboard) SetConfigWritesDisabled(disabled bool) {
+	dashboard.mu.Lock()
+	dashboard.configWritesDisabled = disabled
+	dashboard.mu.Unlock()
 }
 
 func New(refreshRequests ...chan<- ToolActivity) *Dashboard {
@@ -149,8 +208,9 @@ func (dashboard *Dashboard) Handler() http.Handler {
 	return securityHeaders(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		dashboard.mu.RLock()
 		allowedHost := dashboard.allowedHost
+		extraHosts := dashboard.extraHosts
 		dashboard.mu.RUnlock()
-		if allowedHost != "" && request.Host != allowedHost {
+		if allowedHost != "" && request.Host != allowedHost && !extraHosts[strings.ToLower(request.Host)] {
 			http.Error(writer, "unexpected Host header", http.StatusForbidden)
 			return
 		}
@@ -262,7 +322,13 @@ func (dashboard *Dashboard) handleEngines(writer http.ResponseWriter, request *h
 	}
 	entries := []engineCatalogEntry{
 		{Name: "host-pressure", Version: model.CoreVersion, Category: "host health", Role: "pressure", Source: "bundled", Enabled: enabled["host-pressure"], Policy: config.EnginePolicy{Mode: "reasoning_only", ReadOnly: true}, Consumes: []string{model.TypeObservation}, Produces: []string{model.TypePressure}},
+		{Name: "host-determination", Version: model.CoreVersion, Category: "host health", Role: "determination", Source: "bundled", Enabled: enabled["host-determination"], Policy: config.EnginePolicy{Mode: "reasoning_only", ReadOnly: true}, Consumes: []string{model.TypePressure}, Produces: []string{model.TypeDetermination}},
 		{Name: "host-health", Version: model.CoreVersion, Category: "host health", Role: "health", Source: "bundled", Enabled: enabled["host-health"], Policy: config.EnginePolicy{Mode: "reasoning_only", ReadOnly: true}, Consumes: []string{model.TypePressure}, Produces: []string{model.TypeHealth}},
+		{Name: "host-recommendation", Version: model.CoreVersion, Category: "host health", Role: "recommendation", Source: "bundled", Enabled: enabled["host-recommendation"], Policy: config.EnginePolicy{Mode: "reasoning_only", ReadOnly: true}, Consumes: []string{model.TypeDetermination}, Produces: []string{model.TypeRecommendation}},
+		{Name: "host-policy", Version: model.CoreVersion, Category: "host health", Role: "policy", Source: "bundled", Enabled: enabled["host-policy"], Policy: config.EnginePolicy{Mode: "reasoning_only", ReadOnly: true}, Consumes: []string{model.TypeRecommendation}, Produces: []string{model.TypePolicyDecision}},
+		{Name: "host-action", Version: model.CoreVersion, Category: "host health", Role: "action record", Source: "bundled", Enabled: enabled["host-action"], Policy: config.EnginePolicy{Mode: "reasoning_only", ReadOnly: true}, Consumes: []string{model.TypePolicyDecision}, Produces: []string{model.TypeAction}},
+		{Name: "host-outcome", Version: model.CoreVersion, Category: "host health", Role: "outcome", Source: "bundled", Enabled: enabled["host-outcome"], Policy: config.EnginePolicy{Mode: "reasoning_only", ReadOnly: true}, Consumes: []string{model.TypePressure, model.TypeDetermination}, Produces: []string{model.TypeOutcome}},
+		{Name: "host-learning", Version: model.CoreVersion, Category: "host health", Role: "learning", Source: "bundled", Enabled: enabled["host-learning"], Policy: config.EnginePolicy{Mode: "reasoning_only", ReadOnly: true}, Consumes: []string{model.TypeOutcome}, Produces: []string{model.TypeLearning}},
 		{Name: "security-posture", Version: model.CoreVersion, Category: "security", Role: "security assessment", Source: "bundled", Enabled: enabled["security-posture"], Policy: config.EnginePolicy{Mode: "reasoning_only", ReadOnly: true}, Consumes: []string{model.TypeSecurityObservation}, Produces: []string{model.TypeSecurityFinding}},
 	}
 	for _, plugin := range cfg.Plugins {
@@ -386,7 +452,12 @@ func (dashboard *Dashboard) handleConfig(writer http.ResponseWriter, request *ht
 	}
 	dashboard.mu.RLock()
 	store := dashboard.configStore
+	writesDisabled := dashboard.configWritesDisabled
 	dashboard.mu.RUnlock()
+	if writesDisabled {
+		http.Error(writer, "configuration editing is disabled on non-loopback listeners; edit the config file or set dashboard.allow_remote_config", http.StatusForbidden)
+		return
+	}
 	if store == nil {
 		http.Error(writer, "configuration editing is unavailable", http.StatusServiceUnavailable)
 		return
@@ -396,6 +467,8 @@ func (dashboard *Dashboard) handleConfig(writer http.ResponseWriter, request *ht
 		http.Error(writer, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// Listener settings are startup-only and are not editable through the web.
+	configuration.Dashboard = store.Current().Dashboard
 	if _, err := engine.NewRuntime(configuration); err != nil {
 		http.Error(writer, "invalid engine selection: "+err.Error(), http.StatusBadRequest)
 		return
@@ -670,7 +743,7 @@ const indexHTML = `<!doctype html>
       <div class="brand"><div class="mark" aria-hidden="true">P</div><div><div class="eyebrow">Local operations</div><h1>Perceptron SRE</h1></div></div>
       <div class="top-actions"><div class="connection"><span id="connection-dot" class="dot offline"></span><span id="connection">Connecting to local runtime…</span></div><button id="settings-tab" class="gear-btn" type="button" title="Runtime configuration" aria-label="Open runtime configuration">⚙</button></div>
     </header>
-    <nav class="page-nav" aria-label="Dashboard pages"><button id="operations-tab" type="button" aria-current="page">Operations</button><button id="security-tab" type="button">Security</button><button id="simulation-tab" type="button">Simulation</button><button id="store-tab" type="button">Engine Store</button></nav>
+    <nav class="page-nav" aria-label="Dashboard pages"><button id="operations-tab" type="button" aria-current="page">Operations</button><button id="security-tab" type="button">Security</button><button id="domains-tab" type="button">Domains</button><button id="simulation-tab" type="button">Simulation</button><button id="store-tab" type="button">Store</button></nav>
     <div id="operations-page">
     <section class="section" aria-labelledby="timeline-heading"><div class="section-head"><div><div class="header-label">Event stream · newest on left</div><h3 id="timeline-heading">Event timeline &amp; provenance</h3><div id="provenance" class="section-sub">Expandable event cards · left is newest, right is oldest</div></div></div><div id="event-list" class="event-rail"><div class="empty">Waiting for event lineage…</div></div></section>
     <section class="decision-grid" aria-label="Mission decision and recommended next step">
@@ -706,7 +779,7 @@ const indexHTML = `<!doctype html>
       <section class="tier tier-diagnosis">
         <div class="tier-label"><span class="tier-number">1</span> Root-cause assessment</div>
         <section class="section" aria-labelledby="diagnosis-heading"><div class="section-head"><div><h3 id="diagnosis-heading">What is driving this assessment?</h3><div class="section-sub">Leading evidence and contributing component states; not a causal claim beyond the available evidence</div></div></div><div id="diagnosis-summary" class="diagnosis-summary">Waiting for assessment evidence…</div><div id="diagnosis-factors" class="diagnosis-factors"></div><p class="diagnosis-footnote">Unknown is a valid result. GREEN requires complete, valid, fresh required evidence; missing or stale evidence is never healthy by default. Recommendations are not authorization, and this prototype's rule-based findings are not proof of root cause.</p></section>
-        <section class="section" aria-labelledby="cascade-heading"><div class="section-head"><div><h3 id="cascade-heading">Reasoning cascade (L1 → L6)</h3><div class="section-sub">Named layers L1 Metadata/Data, L2 Information, L3 Determination, L4 Assessment, L5 Incident Report, L6 Mitigation, then back to L5 for resolution/recurrence</div></div></div><div id="cascade-live" class="cascade"><div class="empty">Waiting for events…</div></div></section>
+        <section class="section" aria-labelledby="cascade-heading"><div class="section-head"><div><h3 id="cascade-heading">Reasoning cascade (Layer-0 → Layer-8)</h3><div class="section-sub">Layer-0 Input, Layer-1 Information, Layer-2 Determinations, Layer-3 Assessment, Layer-4 Recommendation, Layer-5 Policy, Layer-6 Action, Layer-7 Outcome, Layer-8 Learning</div></div></div><div id="cascade-live" class="cascade"><div class="empty">Waiting for events…</div></div></section>
         <section class="section" aria-labelledby="live-incident-heading"><div class="section-head"><div><h3 id="live-incident-heading">Incident reasoning: Why / How</h3><div class="section-sub">Derived from the current assessment only; unknowns stay unknown</div></div></div><div class="chain-tabs" role="tablist"><button type="button" id="livechain-why-tab" class="chain-tab active" role="tab">Why</button><button type="button" id="livechain-how-tab" class="chain-tab" role="tab">How</button></div><div id="livechain-why-panel"><h4>Why chain (backward causality)</h4><ol id="live-why" class="simulation-factors"></ol></div><div id="livechain-how-panel" hidden><h4>How chain (forward remediation)</h4><ol id="live-how" class="simulation-factors"></ol></div><p id="live-chain-note" class="diagnosis-footnote"></p></section>
       </section>
       <section class="tier tier-components">
@@ -722,6 +795,7 @@ const indexHTML = `<!doctype html>
     </div>
     </div>
     <section id="security-page" hidden><section class="section"><div class="page-title"><div><div class="header-label">Risk posture</div><h2>Security assessment</h2><div class="section-sub">Security findings are reviewed separately from urgent on-call alerts. No findings does not mean security is cleared.</div></div><div id="security-page-status" class="badge unknown">NOT ASSESSED</div></div><div id="security-page-summary" class="diagnosis-summary">Waiting for security assessment…</div><h3>Security posture findings</h3><div id="security-findings" class="category-stack"><div class="empty">Waiting for security evidence…</div></div></section></section>
+    <section id="domains-page" hidden><section class="section"><div class="page-title"><div><div class="header-label">Domain exploration</div><h2>Explore a domain</h2><div class="section-sub">Choose a domain and drill through Layer-0 Input to Layer-8 Learning. A domain with no enabled engine shows no reasoning; that is not a clearance.</div></div><label>Domain <select id="domain-select"><option value="host">Host</option><option value="dns">DNS</option><option value="security">Security</option><option value="application">Application</option></select></label></div><div id="domain-note" class="diagnosis-summary"></div><div id="cascade-domain" class="cascade"></div></section></section>
     <section id="settings-page" hidden><div class="page-title"><div><div class="header-label">Runtime controls</div><h2>Configuration</h2></div><button id="settings-back" class="secondary-btn" type="button">Back to operations</button></div></section>
     <section id="simulation-page" hidden>
       <section class="section"><div class="section-head"><div><h2>Simulation lab</h2><div class="section-sub">Explore deterministic synthetic conditions and alternate thresholds without affecting the live system.</div></div></div><p class="incident-note">Simulation runs in a fresh built-in-engine runtime using synthetic inputs. It does not read or write host state, run plugins, replace the live report, or authorize actions. Results are clearly labeled synthetic and are not production observations.</p>
@@ -738,7 +812,7 @@ const indexHTML = `<!doctype html>
       </div>
     </section>
     <section id="store-page" hidden>
-      <section class="section"><div class="section-head"><div><h2>Engine Store</h2><div class="section-sub">All enabled reasoning modules, including Perceptron-maintained defaults, are catalogued here. Mission aggregation, event transport, policy enforcement, and dashboard services remain core responsibilities.</div></div></div><p class="section-sub">Enable or disable a read-only engine here. Configure per-engine settings in Operations → Runtime configuration. Policy declarations describe intent; they are not grants.</p><div id="store-status" class="section-sub" role="status">Loading the local engine catalog…</div><div id="store-entries" class="store-grid"></div></section>
+      <section class="section"><div class="section-head"><div><h2>Store</h2><div class="section-sub">All enabled reasoning modules, including Perceptron-maintained defaults, are catalogued here. Mission aggregation, event transport, policy enforcement, and dashboard services remain core responsibilities.</div></div></div><div class="store-filters" role="toolbar" aria-label="Filter the Store by layer"><div id="store-layer-filters" class="page-nav"></div><label>Search <input id="store-search" type="search" placeholder="name, type, category"></label></div><p class="section-sub">Every engine type is tagged with the cascade layer it applies to. Enable or disable a read-only engine here. Configure per-engine settings in Operations → Runtime configuration. Policy declarations describe intent; they are not grants.</p><div id="store-status" class="section-sub" role="status">Loading the local engine catalog…</div><div id="store-entries" class="store-grid"></div></section>
       <section class="section" aria-labelledby="core-capabilities-heading"><div class="section-head"><div><h2 id="core-capabilities-heading">Available core capabilities</h2><div class="section-sub">Security posture assessment and synthetic scenario simulation are available in this build with the limitations shown here.</div></div></div><div class="store-grid">
         <article class="store-card" data-capability="simulation"><h3>Simulation lab</h3><span class="planned-status">Available · synthetic only</span><p>Explore deterministic baseline, pressure, stale/missing evidence, and security scenarios with adjustable measurements and thresholds. Full synthetic incident reports and event lineage are separate from live operations.</p><div class="store-meta">Type: core platform capability · Open the Simulation page</div></article>
         <article class="store-card" data-capability="security-posture"><h3>Security posture engine</h3><span class="planned-status">Available · evidence-driven</span><p>Enable <code>security-posture</code> in the local engine catalog and provide current security evidence under Operations configuration. It assesses the supplied states, provenance, and freshness; enabled findings qualify mission status but do not alter host component health or authorize remediation.</p><div class="store-meta">Type: bundled domain engine · Requires supplied evidence</div></article>
@@ -758,7 +832,7 @@ const indexHTML = `<!doctype html>
     let currentConfiguration = null;
     let currentCatalog = [];
     let simulationDefaultsLoaded = false;
-    const builtInEngines = [{name:"host-pressure",description:"Pressure thresholds"},{name:"host-health",description:"Component health"},{name:"security-posture",description:"Assess manually supplied, time-bounded security evidence"}];
+    const builtInEngines = [{name:"host-pressure",description:"Pressure thresholds"},{name:"host-determination",description:"Knowledge-pattern determinations"},{name:"host-recommendation",description:"Advisory recommendations"},{name:"host-policy",description:"Policy decisions"},{name:"host-action",description:"Action records (no executor)"},{name:"host-outcome",description:"Cross-cycle outcomes"},{name:"host-learning",description:"Learning candidates"},{name:"host-health",description:"Component health"},{name:"security-posture",description:"Assess manually supplied, time-bounded security evidence"}];
     function setConfigStatus(message,isError) { const status=byId("config-status");status.textContent=message;status.className="section-sub"+(isError?" config-error":""); }
     function renderConfiguration(configuration) {
       if (!configuration || configurationDirty) return;
@@ -798,12 +872,42 @@ const indexHTML = `<!doctype html>
       next.engines=[...byId("engine-options").querySelectorAll(".engine-option")].filter(option=>option.querySelector("input[data-engine]").checked).map(option=>option.querySelector("input[data-engine]").dataset.engine);
       return next;
     }
-    async function loadCatalog() {
-      const response=await fetch("/api/engines",{cache:"no-store"});
-      if(!response.ok)throw new Error("Engine catalog request failed ("+response.status+")");
-      currentCatalog=await response.json();const container=byId("store-entries");clear(container);
-      currentCatalog.forEach(entry=>{
+    const storeLayers=[["all","All"],["0","Layer-0 Input"],["1","Layer-1 Information"],["2","Layer-2 Determinations"],["3","Layer-3 Assessment"],["4","Layer-4 Recommendation"],["5","Layer-5 Policy"],["6","Layer-6 Action"],["7","Layer-7 Outcome"],["8","Layer-8 Learning"],["?","Unmapped"]];
+    let storeFilter="all";
+    function engineLayer(entry) {
+      const role=String(entry.role||"").toLowerCase();
+      const produces=(entry.produces||[]).join(" ");
+      if(/tap|collector|input/.test(role)||(!(entry.consumes||[]).length&&/observation/.test(produces)))return "0";
+      if(/pressure|information/.test(role))return "1";
+      if(/determination/.test(role))return "2";
+      if(/health|assessment|mission/.test(role))return "3";
+      if(/recommend/.test(role))return "4";
+      if(/policy/.test(role))return "5";
+      if(/action/.test(role))return "6";
+      if(/outcome/.test(role))return "7";
+      if(/learning/.test(role))return "8";
+      return "?";
+    }
+    function layerLabel(key) {return (storeLayers.find(item=>item[0]===key)||storeLayers[10])[1];}
+    function renderStoreEntries() {
+      const container=byId("store-entries");clear(container);
+      const query=byId("store-search").value.trim().toLowerCase();
+      const filters=byId("store-layer-filters");clear(filters);
+      storeLayers.forEach(([key,label])=>{
+        const count=key==="all"?currentCatalog.length:currentCatalog.filter(entry=>engineLayer(entry)===key).length;
+        const button=text("button","",label+" ("+count+")");button.type="button";
+        if(key===storeFilter)button.setAttribute("aria-current","page");
+        button.addEventListener("click",()=>{storeFilter=key;renderStoreEntries();});filters.append(button);
+      });
+      const shown=currentCatalog.filter(entry=>(storeFilter==="all"||engineLayer(entry)===storeFilter)&&(!query||[entry.name,entry.role,entry.category,entry.source].join(" ").toLowerCase().includes(query)));
+      if(!shown.length)container.append(text("div","empty","No engines match this layer or search."));
+      shown.forEach(entry=>renderStoreCard(entry,container));
+      byId("store-status").textContent=shown.length+" of "+currentCatalog.length+" catalog engines shown. No remote packages are downloaded.";
+    }
+    byId("store-search").addEventListener("input",()=>renderStoreEntries());
+    function renderStoreCard(entry,container) {
         const card=text("article","store-card","");card.append(text("h3","",entry.name+" · "+entry.version));
+        card.append(text("div","store-meta","Applies to: "+layerLabel(engineLayer(entry))));
         card.append(text("p","",(entry.category||"uncategorized")+" / "+(entry.role||"engine")+" · "+(entry.source||"local")));
         card.append(text("div","store-policy","Policy: "+((entry.policy&&entry.policy.mode)||"undeclared")+" · read-only="+String(Boolean(entry.policy&&entry.policy.read_only))+" · tools="+JSON.stringify((entry.policy&&entry.policy.allowed_tools)||[])+" · scripts="+JSON.stringify((entry.policy&&entry.policy.allowed_scripts)||[])));
         card.append(text("div","store-meta","Consumes: "+(entry.consumes||[]).join(", ")+" · Produces: "+(entry.produces||[]).join(", ")));
@@ -811,12 +915,15 @@ const indexHTML = `<!doctype html>
         if(button.disabled)button.title="Current runtime accepts read-only engines only.";
         button.addEventListener("click",async()=>{button.disabled=true;try{const next=JSON.parse(JSON.stringify(currentConfiguration||{}));const names=next.engines||[];next.engines=entry.enabled?names.filter(name=>name!==entry.name):[...new Set(names.concat(entry.name))];const saved=await fetch("/api/config",{method:"PUT",headers:{"Content-Type":"application/json","X-Requested-With":"PerceptronDashboard"},body:JSON.stringify(next),cache:"no-store"});if(!saved.ok)throw new Error((await saved.text())||"Engine selection save failed ("+saved.status+")");currentConfiguration=await saved.json();configurationDirty=false;renderConfiguration(currentConfiguration);await loadCatalog();byId("store-status").textContent="Engine selection saved; it applies on the next assessment cycle.";}catch(error){byId("store-status").textContent=error.message||"Engine selection failed.";button.disabled=false;}});
         card.append(button);container.append(card);
-      });
-      byId("store-status").textContent=currentCatalog.length+" catalog engines. No remote packages are downloaded.";
+    }
+    async function loadCatalog() {
+      const response=await fetch("/api/engines",{cache:"no-store"});
+      if(!response.ok)throw new Error("Engine catalog request failed ("+response.status+")");
+      currentCatalog=await response.json();renderStoreEntries();
     }
     byId("settings-page").append(byId("configuration-panel"));
     function showPage(page) {
-      ["operations","security","simulation","store","settings"].forEach(name=>{byId(name+"-page").hidden=name!==page;});
+      ["operations","security","domains","simulation","store","settings"].forEach(name=>{byId(name+"-page").hidden=name!==page;});
       document.querySelectorAll(".page-nav button").forEach(button=>button.removeAttribute("aria-current"));
       const activeTab=page==="settings"?"operations":page;
       const tab=byId(activeTab+"-tab");
@@ -825,6 +932,8 @@ const indexHTML = `<!doctype html>
     }
     byId("operations-tab").addEventListener("click",()=>showPage("operations"));
     byId("security-tab").addEventListener("click",()=>showPage("security"));
+    byId("domains-tab").addEventListener("click",()=>showPage("domains"));
+    byId("domain-select").addEventListener("change",()=>renderDomain(lastData));
     byId("simulation-tab").addEventListener("click",()=>showPage("simulation"));
     byId("store-tab").addEventListener("click",()=>showPage("store"));
     bindChainTabs("chain");bindChainTabs("livechain");
@@ -1019,7 +1128,7 @@ const indexHTML = `<!doctype html>
     function renderTimeline(events) {
       clear(byId("event-list"));
       if (!events.length) { byId("event-list").append(text("div","empty","No events are available.")); return; }
-      const names = {"assessment.cycle.started.v1":"Cycle started","observation.host.v1":"Host observation","pressure.host.v1":"Pressure assessment","health.host.v1":"Component health","mission.host.v1":"Mission assessment"};
+      const names = {"assessment.cycle.started.v1":"Cycle started","observation.host.v1":"Host observation","pressure.host.v1":"Pressure assessment","health.host.v1":"Component health","determination.host.v1":"Determination","mission.host.v1":"Mission assessment"};
       events.slice().sort((left,right) => new Date(right.occurred_at) - new Date(left.occurred_at)).forEach(event => {
         const item = document.createElement("details");
         item.className="event-node";
@@ -1041,29 +1150,54 @@ const indexHTML = `<!doctype html>
     function renderCascade(events, targetId, incident) {
       const target=byId(targetId);clear(target);
       if(!events||!events.length){target.append(text("div","empty","No events available."));return;}
-      const layerOf={"observation.host.v1":1,"observation.security.v1":1,"assessment.cycle.started.v1":1,"pressure.host.v1":2,"health.host.v1":3,"security.finding.v1":3,"mission.host.v1":4};
-      const names={1:"L1 · Metadata / Data",2:"L2 · Information",3:"L3 · Determination",4:"L4 · Assessment",0:"Unmapped event types"};
+      const layerOf={"observation.host.v1":1,"observation.security.v1":1,"assessment.cycle.started.v1":1,"pressure.host.v1":2,"determination.host.v1":3,"security.finding.v1":3,"health.host.v1":4,"mission.host.v1":4,"recommendation.host.v1":5,"policy.decision.v1":6,"action.record.v1":7,"outcome.host.v1":8,"learning.candidate.v1":9};
+      const names={1:"Layer-0 Input",2:"Layer-1 Information",3:"Layer-2 Determinations",4:"Layer-3 Assessment",5:"Layer-4 Recommendation",6:"Layer-5 Policy",7:"Layer-6 Action",8:"Layer-7 Outcome",9:"Layer-8 Learning",0:"Unmapped event types"};
+      const detail={
+        "determination.host.v1":p=>"▸ "+p.title+" ["+p.severity+", "+p.knowledge_source+" "+Math.round(p.knowledge_weight||0)+"%] "+p.interpretation,
+        "recommendation.host.v1":p=>"▸ P"+p.priority+" "+p.title+": "+p.recommendation+" (advisory; "+p.action_kind+")",
+        "policy.decision.v1":p=>"▸ "+p.pattern_id+" → "+p.decision+" ("+p.rule+")",
+        "action.record.v1":p=>"▸ "+p.pattern_id+" · "+p.status+" · executed: "+p.executed+" · "+p.reason,
+        "outcome.host.v1":p=>"▸ "+p.title+" → "+String(p.status).toUpperCase()+" ("+p.previous_severity+(p.current_severity?" → "+p.current_severity:"")+") "+p.explanation,
+        "learning.candidate.v1":p=>"▸ "+p.kind+" · "+p.status+" · applied: "+p.applied+" · "+p.proposal
+      };
       const layers={};events.forEach(event=>{const d=layerOf[event.type]||0;(layers[d]=layers[d]||[]).push(event);});
       const addColumn=(title,lines)=>{
         if(target.children.length)target.append(text("div","cascade-arrow","→"));
         const column=text("div","cascade-layer","");column.append(text("h4","",title));
         lines.forEach(line=>column.append(text("div","cascade-item",line)));target.append(column);
       };
-      [1,2,3,4,0].forEach(d=>{
-        if(!layers[d]){if(d)addColumn(names[d],["No events at this layer."]);return;}
+      const inc=incident||{};
+      [1,2,3,4,5,6,7,8,9,0].forEach(d=>{
+        const extra=d===5?["Incident: "+(inc.title||"Not assessed")+" · "+(inc.status||"UNKNOWN")+" (Why / How: see Incident reasoning)"]:[];
+        if(!layers[d]){if(d)addColumn(names[d],["No events this cycle."].concat(extra));return;}
         const counts={};
         layers[d].forEach(event=>{const key=event.source+" → "+event.type+" ["+event.origin+"]";counts[key]=(counts[key]||0)+1;});
-        addColumn(names[d],Object.keys(counts).map(key=>key+(counts[key]>1?" ×"+counts[key]:"")));
+        const lines=Object.keys(counts).map(key=>key+(counts[key]>1?" ×"+counts[key]:""));
+        layers[d].forEach(event=>{if(detail[event.type]&&event.payload)lines.push(detail[event.type](event.payload));});
+        addColumn(names[d],lines.concat(extra));
       });
-      const inc=incident||{};
-      addColumn("L5 · Incident Report",[(inc.title||"Not assessed")+" · "+(inc.status||"UNKNOWN"),"Why / How chains: see Incident reasoning"]);
-      addColumn("L6 · Mitigation",["Recommendation only; no mitigation executed or recorded","Not authorization"]);
-      addColumn("↺ L5 · Resolution or recurrence",["UNKNOWN: not tracked in this build"]);
     }
     function bindChainTabs(prefix) {
       [["why","how"],["how","why"]].forEach(([on,off])=>byId(prefix+"-"+on+"-tab").addEventListener("click",()=>{byId(prefix+"-"+on+"-panel").hidden=false;byId(prefix+"-"+off+"-panel").hidden=true;byId(prefix+"-"+on+"-tab").classList.add("active");byId(prefix+"-"+off+"-tab").classList.remove("active");}));
     }
+    let lastData=null;
+    function renderDomain(data) {
+      if(!data)return;
+      const domain=byId("domain-select").value;
+      const securityTypes=["observation.security.v1","security.finding.v1"];
+      const hostTypes=["observation.host.v1","assessment.cycle.started.v1","pressure.host.v1","determination.host.v1","health.host.v1","mission.host.v1","recommendation.host.v1","policy.decision.v1","action.record.v1","outcome.host.v1","learning.candidate.v1"];
+      const types=domain==="host"?hostTypes:(domain==="security"?securityTypes:[]);
+      const events=((data.runtime||{}).events||[]).filter(event=>types.includes(event.type));
+      byId("domain-note").textContent=types.length
+        ? (domain==="security"?"Security: only evidence-driven findings exist today (Layer-0 evidence and Layer-2 findings); no information, recommendation, policy, action, or outcome layers are built for this domain."
+          :"Host: all layers are populated from host observations. Every assessment is traceable to the events below.")
+        : "No engine or tap exists for this domain yet, so nothing is assessed. Absence of data is not health.";
+      if(!events.length){clear(byId("cascade-domain"));byId("cascade-domain").append(text("div","empty","No events for this domain this cycle."));return;}
+      renderCascade(events,"cascade-domain",domain==="host"?data.live_incident:null);
+    }
     function render(data) {
+      lastData=data;
+      renderDomain(data);
       renderCascade((data.runtime||{}).events||[],"cascade-live",data.live_incident);
       renderChains(data.live_incident||{},"live-why","live-how","live-chain-note");
       const runtime = data.runtime || {};

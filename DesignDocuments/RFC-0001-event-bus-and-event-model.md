@@ -134,7 +134,7 @@ The proposed high-level categories map to the operational reasoning model:
 - **Platform health:** core, bus, engine, knowledge, twin, and other Perceptron SRE health observations.
 - **Human decision:** human validation, approval, escalation, or override, with attributable actor and authorization context.
 
-Categories are for discoverability and governance; they do not define a fixed pipeline or one event per category. Event names and payload schemas should be owned in a registry or equivalent versioned contract. The registry mechanism remains open.
+Categories are for discoverability and governance; they do not define a fixed pipeline or one event per category. The canonical cascade layers (Layer-0 Input through Layer-8 Learning, Overall Architecture 6.4 and RFC-0002 6.1) group these categories. The prototype publishes `observation.host.v1`, `observation.security.v1` (Layer-0); `pressure.host.v1` (Layer-1); `determination.host.v1`, `security.finding.v1` (Layer-2); `health.host.v1`, `mission.host.v1` (Layer-3); `recommendation.host.v1` (Layer-4); `policy.decision.v1` (Layer-5); `action.record.v1` (Layer-6); `outcome.host.v1` (Layer-7); and `learning.candidate.v1` (Layer-8). Derived events must list the input events they derive from, reference only input entities, and preserve origin, version, configuration ID, and correlation ID; the runtime rejects engine output that does not. Event types not mapped to a layer are shown as unmapped rather than guessed. Event names and payload schemas should be owned in a registry or equivalent versioned contract. The registry mechanism remains open.
 
 ## 9. Event ownership and entity references
 

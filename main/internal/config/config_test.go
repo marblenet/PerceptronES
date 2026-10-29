@@ -253,3 +253,44 @@ func temporaryConfigPath(t *testing.T) string {
 	}
 	return filepath.Clean(path)
 }
+
+func TestDashboardListenSettingsValidation(t *testing.T) {
+	cfg := Default()
+	if cfg.Dashboard.ListenAddress != "127.0.0.1" || cfg.Dashboard.Port != 8080 {
+		t.Fatalf("unexpected default dashboard settings: %#v", cfg.Dashboard)
+	}
+	if !cfg.Dashboard.IsLoopback() {
+		t.Fatal("default dashboard address should be loopback")
+	}
+
+	cfg.Dashboard.ListenAddress = "10.0.0.5"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("literal non-loopback dashboard address rejected: %v", err)
+	}
+	if cfg.Dashboard.IsLoopback() {
+		t.Fatal("non-loopback dashboard address reported as loopback")
+	}
+
+	cfg.Dashboard.ListenAddress = "0.0.0.0"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("unspecified dashboard address rejected: %v", err)
+	}
+	for _, address := range []string{"localhost", ""} {
+		cfg = Default()
+		cfg.Dashboard.ListenAddress = address
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("dashboard address %q should be rejected", address)
+		}
+	}
+
+	cfg = Default()
+	cfg.Dashboard.Port = 70000
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("dashboard port 70000 should be rejected")
+	}
+	cfg = Default()
+	cfg.Dashboard.AllowedHosts = []string{"a b"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("dashboard allowed host containing whitespace should be rejected")
+	}
+}

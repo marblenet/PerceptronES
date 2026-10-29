@@ -75,6 +75,32 @@ Final mission aggregation is a core service, not an installable engine. Domain e
 
 An engine must state where it participates in the operational reasoning model (for example, pressure, health, impact, or mission). This role is descriptive and does not grant authority.
 
+### 6.1 Canonical layers and engine classes
+
+Engines are classified by cascade layer. Layers are written `Layer-<number> <Label>`; Layer-0 Input is numbered because the Knowledge Base memo leaves it unnumbered while fixing Layer 1 and Layer 2. Reasoning is forward-only: there is no backpropagation, runtime retraining, or hidden weight adjustment.
+
+| Layer | Engine class | Consumes | Produces | Prototype engine |
+|---|---|---|---|---|
+| Layer-0 Input | Tap engine | Host sources (`/proc`, `/sys`), supplied evidence | Observations only | collectors in `internal/observe` |
+| Layer-1 Information | Information engine (Layer-1 perceptron) | Observations | Information, not conclusions | `host-pressure` |
+| Layer-2 Determinations | Determination engine (Layer-2 perceptron) | Information | Determinations | `host-determination`, `security-posture` |
+| Layer-3 Assessment | Assessment engine | Determinations and health inputs | Assessments (host, security, DNS, mission) | `host-health`; core mission service |
+| Layer-4 Recommendation | Recommendation engine | Assessments or determinations | Advisory recommendations | `host-recommendation` |
+| Layer-5 Policy | Policy engine | Recommendations | Policy decisions (RFC-0010 8.1) | `host-policy` |
+| Layer-6 Action | Action engine | Authorized recommendations | Action records | `host-action` (record only) |
+| Layer-7 Outcome | Outcome engine | Determinations over time, actions | Outcomes | `host-outcome` |
+| Layer-8 Learning | Learning engine | Outcomes, investigations, Why/How chains | Knowledge, simulation, and regression-test candidates | `host-learning` |
+
+Source files in the Go core are named `layer<N>_<name>.go` and engines run in the configured order; the runtime requires every consumed event type to come from an initial event or an earlier engine. Open: Layer-2 determinations do not yet feed Layer-3 health or mission; Layer-4 currently consumes determinations rather than assessments.
+
+### 6.2 Core + Extension and resource budgets
+
+Every engine class supports **Core**, **Local Operator**, and **Community** variants (Overall Architecture 4.25). Core engines ship with the platform; Local engines are private to an organization; Community engines arrive through reviewed pull requests or Store packages. The platform grows by extension rather than modification of the core, and the core stays deterministic, small, and efficient while extensions may be flexible or experimental.
+
+Critical-path components (tap engines, event bus, core runtime, assessment pipeline, policy runtime) prioritize correctness, determinism, efficiency, stability, and predictability over feature velocity. Each critical-path component and each engine declares CPU, memory, storage, network, and execution budgets; none may have unlimited growth characteristics, and Perceptron SRE must not cause the incidents it reasons about (for example metrics collection exhausting CPU, logging filling a disk, an engine consuming excess memory, or the pipeline becoming a bottleneck). Budgets are declarations until the runtime enforces them; the prototype enforces only plugin timeouts and output bounds, and numeric defaults need workload evidence.
+
+Configuration is version-controlled operational knowledge organized by domain (Overall Architecture 8.4): optional `config.d/<domain>.json` files overlay domain settings, each limited to its own keys, while platform settings stay in the core file.
+
 ## 7. Engine self-description and declarations
 
 **Proposed requirement:** before an engine is loaded or enabled, it declares enough metadata for the runtime and operators to understand and govern it. Candidate fields include:
@@ -238,6 +264,8 @@ Engines capable of tools, storage, twin access, or production actions require le
 - Runtime validates declarations and rejects incompatible or unauthorized engines with an explicit diagnostic.
 - Capability grants are least-privilege, enforceable, and auditable.
 - Output classes distinguish facts/observations, assessments, recommendations, policy authorization decisions, and execution/outcomes.
+- Each engine is assigned a canonical cascade layer (6.1), supports the Core/Local/Community model, and declares resource budgets; critical-path components have enforced or explicitly labelled-as-declared budgets.
+- Domain configuration overlays reject keys outside their domain.
 - Engines cannot self-promote a recommendation or assessment into an authorization or execution result.
 - Engine inputs and outputs are validated against versioned contracts.
 - A failing engine reports failure without being represented as a healthy domain result.
@@ -263,7 +291,7 @@ Engines capable of tools, storage, twin access, or production actions require le
 6. How are required versus optional dependencies declared, validated, and propagated through the graph? How are incomplete chains represented in coverage/confidence (ARCH-024)?
 7. What coverage dimensions are required, and how do availability, coverage, and confidence compose in outputs?
 8. Which local or persistent state is permitted, and how is its justification, recovery, and replay handled?
-9. What resource limits are global defaults versus per-engine configuration?
+9. What resource budgets (CPU, memory, storage, network, execution) are global defaults versus per-engine, which are enforced, and how are overruns surfaced?
 10. How are concurrency, retries, idempotency, and backpressure handled?
 11. What health states and signals are required, and how does degraded coverage propagate through dependencies?
 12. Which engine classes must be deterministic?

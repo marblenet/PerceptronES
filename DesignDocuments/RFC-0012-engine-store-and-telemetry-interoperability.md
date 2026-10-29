@@ -73,13 +73,15 @@ First-party defaults use the same catalog, configuration, and protocol contract.
 
 ### 5.2 Operator Store behavior
 
-The Store has three conceptual sources:
+The Store has three conceptual sources, matching the platform-wide Core + Extension model (Overall Architecture 4.25):
 
-1. **Bundled:** first-party engines delivered with a Perceptron release.
-2. **Local:** engines authored or installed by the operator under the external package directory.
-3. **Published third party:** an engine package published by an external maintainer and installed locally after operator review.
+1. **Core (bundled):** first-party engines and packs delivered with a Perceptron release.
+2. **Local Operator:** engines, knowledge, assessments, dashboards, or simulation packs authored or installed by the operator under the external package directory; private to the organization.
+3. **Community (published third party):** a package published by an external maintainer, reviewed through pull request or Store review, and installed locally after operator review.
 
-The Store shows source, publisher, version, enabled state, category, settings, declared contracts, requested capabilities, policy profile, trust/verification state, and compatibility. Install/upgrade is distinct from enablement. Discovery must not execute package code; install and enablement are separate operator actions. The initial dashboard can catalog bundled and locally declared engines but has no remote registry, signature verification, or automated installation.
+Package types are not limited to engines: tap, information, determination, and assessment engines, knowledge stores (RFC-0009 6.3), dashboards, and simulation packs all follow the same tiers. Source weights for knowledge are operator-configured precedence, not trust or confidence. Community votes, reviews, and ratings may inform review and visibility only; popularity is not truth and never enables or promotes a package automatically. Provenance (source tier, publisher, version) is preserved on every item the package contributes.
+
+The Store shows source, publisher, version, enabled state, category, settings, declared contracts, requested capabilities, policy profile, trust/verification state, and compatibility. Every engine type is tagged with the cascade layer it applies to (Layer-0 Input through Layer-8 Learning, or Unmapped when its role fits no layer), and the Store can be filtered by layer and searched. The dashboard page is named "Store". Install/upgrade is distinct from enablement. Discovery must not execute package code; install and enablement are separate operator actions. The initial dashboard can catalog bundled and locally declared engines but has no remote registry, signature verification, or automated installation.
 
 ## 6. Action-policy metadata and enforcement
 
@@ -117,7 +119,7 @@ Perceptron should enrich, not seize ownership of, the legacy destination: operat
 
 The dashboard separates Operations from the Engine Store. Operations presents mission and evidence. Configuration groups global collectors/runtime options separately from each engine's own settings. The Store supports inspection and enable/disable of installed, compatible engines and links contributors to package requirements.
 
-Configuration files remain the authoritative local source until a persistent registry contract is accepted. Updates are validated before atomic persistence and applied on a subsequent cycle. Invalid edits retain last-known-good configuration and emit a diagnostic. Package binary/manifest changes are administrator-controlled and are not performed by dashboard settings updates.
+Configuration files remain the authoritative local source until a persistent registry contract is accepted. Configuration is version-controlled operational knowledge organized by domain: the core file holds platform keys (dashboard, policy, engines, plugins, knowledge), and optional `config.d/<domain>.json` overlays (host, network, security, dns, application) may set only their own domain's keys; unknown domains or keys are rejected (implemented; Overall Architecture 8.4). The listen address is configurable. Updates are validated before atomic persistence and applied on a subsequent cycle. Invalid edits retain last-known-good configuration and emit a diagnostic. Package binary/manifest changes are administrator-controlled and are not performed by dashboard settings updates. before atomic persistence and applied on a subsequent cycle. Invalid edits retain last-known-good configuration and emit a diagnostic. Package binary/manifest changes are administrator-controlled and are not performed by dashboard settings updates.
 
 ## 9. Security, privacy, and availability
 
@@ -133,6 +135,7 @@ Configuration files remain the authoritative local source until a persistent reg
 ## 10. Acceptance criteria
 
 - Bundled and external engines have a common versioned package contract and visible catalog state.
+- Every package declares its tier (Core, Local, Community) and provenance; community votes never enable or promote behavior.
 - Configuration is grouped by core and engine ownership and rejects invalid settings explicitly.
 - Store discovery is separate from package installation and execution.
 - Policy declarations cannot themselves grant access or authorize actions.
@@ -157,6 +160,8 @@ The local dashboard also offers a separate Simulation page and bounded service w
 7. Which stable metric names/labels and cardinality limits are approved for platform and domain findings?
 8. How are customer/tenant identifiers and sensitive payload fields redacted or aggregated?
 9. What incident/paging destination, if any, should Perceptron integrate directly rather than through the existing metrics system?
+10. How are knowledge, dashboard, and simulation packs packaged and distributed across Core, Local, and Community tiers, and how are community review signals used without becoming trust?
+11. How are per-package resource budgets (CPU, memory, storage, network, execution) declared and enforced (RFC-0002 6.2)?
 
 ## 12. Dependencies
 

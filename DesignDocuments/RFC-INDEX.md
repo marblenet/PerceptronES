@@ -31,7 +31,7 @@ The order is not strictly serial: reviews can overlap, but downstream contracts 
 
 ## Architecture diagrams
 
-The standalone [diagram catalog](diagrams/README.md) contains twelve Mermaid views for architecture boundaries and intended use cases. Each applicable RFC links directly to its related diagrams. The diagrams are illustrative and do not supersede RFC requirements or resolve open decisions.
+The standalone [diagram catalog](diagrams/README.md) contains thirteen Mermaid views for architecture boundaries and intended use cases. Each applicable RFC links directly to its related diagrams. The diagrams are illustrative and do not supersede RFC requirements or resolve open decisions.
 
 ## RFC lifecycle
 

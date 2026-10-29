@@ -10,7 +10,7 @@ Perceptron SRE (Site Reliability Engine) is an application in the **PerceptronES
 
 It is designed to work alongside existing monitoring and control systems—not replace them. Feed it metrics and events, let its engines add operational context, then send its findings back to the monitoring stack your team already uses.
 
-> **Development status:** early, working single-host prototype. The current Go binary collects Linux host observations, runs host pressure/health reasoning, optionally assesses operator-supplied security evidence, offers a separate bounded Simulation page with configurable synthetic inputs and full event reports, produces mission assessments and provenance, serves a loopback dashboard, and exposes current-cycle JSON and Prometheus metrics. Automated security scanners, broad integrations, durable incident history, package isolation, and automated mitigation are not current capabilities.
+> **Development status:** early, working single-host prototype. The current Go binary collects Linux host observations, runs host pressure/health reasoning, optionally assesses operator-supplied security evidence, offers a separate bounded Simulation page with configurable synthetic inputs and full event reports, produces mission assessments and provenance, serves a dashboard (loopback by default, configurable listen address), and exposes current-cycle JSON and Prometheus metrics. Automated security scanners, broad integrations, durable incident history, package isolation, and automated mitigation are not current capabilities.
 
 ## Why Perceptron SRE?
 
@@ -58,7 +58,7 @@ Perceptron SRE is **not an unbounded LLM making operational decisions**. The cur
 - Retrieve the latest full cycle as JSON and expose current-cycle metrics at `/metrics` for Prometheus-compatible scrapers such as Grafana.
 - Run with no domain engines enabled; the core still reports a mission assessment with unknown/missing coverage rather than claiming health.
 
-The current dashboard binds to loopback only. The metrics endpoint is a scrape view, not a remote-write exporter or paging service. The current prototype retains only the latest cycle in memory; it does not yet generate a durable incident report with one minute of pre-incident history and five minutes after mitigation.
+The current dashboard binds to loopback by default; a non-loopback listen address is an explicit opt-in without authentication or TLS. The metrics endpoint is a scrape view, not a remote-write exporter or paging service. The current prototype retains only the latest cycle in memory; it does not yet generate a durable incident report with one minute of pre-incident history and five minutes after mitigation.
 
 ## How it fits your existing observability stack
 
@@ -151,8 +151,7 @@ See [`main/README.md`](main/README.md) for the current implementation details, o
 
 ## Documentation
 
-- [Engineering philosophy](DesignDocuments/ENGINEERING-PHILOSOPHY.md)
-- [Overall architecture](DesignDocuments/01-overall-architecture.md)
+- [Overall architecture](DesignDocuments/01-overall-architecture.md) (includes engineering philosophy, section 4.23-4.29)
 - [RFC index](DesignDocuments/RFC-INDEX.md)
 - [Implementation roadmap](Implementation/IMPLEMENTATION-ROADMAP.md)
 - [Architecture diagrams](DesignDocuments/diagrams/README.md)

@@ -75,6 +75,18 @@ func NewRuntime(cfg config.Config) (*Runtime, error) {
 			current, err = newPressureEngine(cfg)
 		case "host-health":
 			current = healthEngine{}
+		case "host-determination":
+			current, err = newDeterminationEngine(cfg.Knowledge)
+		case "host-recommendation":
+			current = recommendationEngine{}
+		case "host-policy":
+			current = policyEngine{defaultDecision: cfg.Policy.DefaultDecision, rules: cfg.Policy.Rules}
+		case "host-action":
+			current = actionEngine{}
+		case "host-outcome":
+			current, err = newOutcomeEngine(cfg.Knowledge)
+		case "host-learning":
+			current = learningEngine{}
 		case "host-mission":
 			continue
 		case "security-posture":

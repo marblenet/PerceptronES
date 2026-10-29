@@ -1,5 +1,47 @@
 # Changelog
 
+## 2026-10-28
+### Store and dashboard pages
+- "Engine Store" renamed "Store"; it filters by cascade layer (Layer-0..8, Unmapped) and text search, and every engine type is tagged with its layer.
+- New Domains page (Domain Exploration memo) with a Host / DNS / Security / Application selector and per-domain Layer-0..8 drill-down. Host is full; Security shows evidence and findings only; DNS and Application have no engines and say nothing is assessed.
+
+### Documentation (memos folded into design docs)
+- Rule: memos update `01-overall-architecture.md` and the RFCs; the design docs are the source of truth for code.
+- `01-overall-architecture.md`: system definition (section 2), Core + Extension (4.25), reliability through simplicity and the Perceptron Neural Network Cascade (4.26), perceptron meaning (4.27), Why/How chains (4.28), applying guidance plus quality gates, break glass override (Proposed) and the two-page dashboard (4.29), tap engines and contributor contract (6.3), canonical Layer-# table (6.4), Knowledge Store (6.6), event origin, PES and simulation (6.8), repository architecture and domain configuration (8.4). `ENGINEERING-PHILOSOPHY.md` and `ENGINE-PLATFORM-ADDENDUM.md` were fully merged into these sections and removed; older entries below that cite them refer to those former files.
+- RFC updates: RFC-0001 maps event types to Layer-0..8; RFC-0002 adds canonical layers (6.1), Core + Extension and resource budgets (6.2); RFC-0009 adds Knowledge Store sources, weights, pattern semantics and domain roadmap (6.3); RFC-0010 adds Layer-5..7 semantics (8.1); RFC-0012 adds Core/Local/Community tiers for all package types, the community-vote caveat and domain configuration; notes in RFC-0004/0007/0008; RFC-INDEX (13 diagrams), roadmap 1.4 cascade and D-12 tiers updated. Unbuilt items are marked Open/Proposed.
+- Example IPs in `main/README.md`, tests and this file now use documentation addresses (`10.0.0.5`, `203.0.113.10`); `.gitignore` also excludes `DesignDocuments/Memos`, the root Linux binary and `*.key`.
+
+### Config: domain-oriented configuration
+- Optional `config.d/<domain>.json` next to the core config overlays domain settings (`host`, `network`, `security`, `dns`, `application`); each domain may set only its own keys, platform keys (dashboard, policy, engines, plugins, knowledge) stay in the core file, and unknown domains or keys are rejected. Not built: Core/Local/Community directories per layer, Store packages, resource-budget enforcement.
+
+### Layer naming and file architecture
+- Every layer is now `Layer-<number> <Label>` (Layer-0 Input … Layer-8 Learning) in the dashboard, code comments and documents. Input is numbered Layer-0 because the memo leaves it unnumbered while fixing Layer-1 Information and Layer-2 Determinations.
+- `main/internal/engine` files are renamed by layer (`layer1_information.go`, `layer2_determination.go`, `layer2_security.go`, `layer3_assessment_*.go`, `layer4_recommendation.go` … `layer8_learning.go`, `layers_common.go`). No behavior change. Layout is described in `01-overall-architecture.md` sections 6.4 and 8.4.
+
+### Cascade layers implemented (Recommendation, Policy, Action, Outcome, Learning)
+- New engines: `host-recommendation`, `host-policy`, `host-action`, `host-outcome`, `host-learning`, producing `recommendation.host.v1`, `policy.decision.v1`, `action.record.v1`, `outcome.host.v1`, `learning.candidate.v1`. All are in the default engine list; explicit `engines` lists must add them.
+- Recommendations are advisory (CRITICAL escalates to a human, others investigate). Policy config `policy.default_decision` and `policy.rules` (pattern ID or `domain:<name>`): authorized, require_approval (default), simulation_only, denied.
+- Action records state what happened to a decision; no executor exists, so `executed` is always false.
+- Outcome compares determinations across live cycles in memory (lost on restart). `resolved` requires fresh evidence for every metric the pattern uses, otherwise `unknown`. Outcomes are never attributed to an action.
+- Learning emits candidates only (regression-test proposal when resolved, knowledge review when worse); nothing is applied.
+- Knowledge: `community_patterns`, `weights` (default core 30 / local 60 / community 10; highest weight wins on ID collisions, zero ignores a source), optional pattern `recommendation` text; determinations report source and weight.
+- Dashboard cascade shows all layers with per-event detail; engine catalog lists the new engines. `perceptron.json` updated.
+- Still Open: determinations feeding health/mission, Security and Services determinations, action executor and approval workflow, durable outcome history, PES (needs a threat model before any implementation).
+
+### Knowledge base and determinations
+- New `internal/knowledge` package: pattern model, validation, Core/Local resolution, 19 core patterns (CPU, memory, storage, network, system limits).
+- New `host-determination` engine (consumes pressure, produces `determination.host.v1`), added to default engines after `host-pressure`. Existing configs that list engines must add it.
+- Config `knowledge.local_patterns` / `knowledge.disabled_patterns`; local pattern with a core ID overrides it.
+- Dashboard: determination shown in the Layer-2 cascade column and engine catalog.
+- Unavailable or stale evidence never matches. Determinations do not yet feed health/mission (Open). Community packages and Services/Security patterns are not implemented (source weights were added later; see the cascade entry above).
+- Docs: canonical cascade and Knowledge Store model (now in `01-overall-architecture.md` 6.4 and 6.6). Dashboard uses the memo layer names (Layer-1 Information, Layer-2 Determinations, and so on); the earlier L1–L6 labels are retired.
+
+### Configurable dashboard listen address
+- New `dashboard` config section: `listen_address` (literal IP, default `127.0.0.1`), `port` (default 8080), `allowed_hosts`, `allow_remote_config`. New `--web-addr` flag; `--web-addr`/`--web-port` override the file.
+- Motivated by an OCI host where the loopback-only bind was unreachable; set `listen_address` to the VNIC address (e.g. `10.0.0.5`) or `0.0.0.0`.
+- Safeguards for non-loopback binds: Host header allow-list (own/interface addresses plus `allowed_hosts`), web config editing disabled unless `allow_remote_config`, startup warning logged. Listener settings are startup-only and preserved when the web UI saves config.
+- Still no authentication or TLS; use firewalld and the OCI security list (open the TCP port) or an SSH tunnel. Verified on a live OCI host (Oracle Linux 9): dashboard reachable on the VNIC address.
+
 ## 2026-10-26
 
 ### Top 50 host metrics

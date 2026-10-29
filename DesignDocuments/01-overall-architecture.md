@@ -27,6 +27,8 @@ The platform turns low-level observations into progressively more operationally 
 
 These are conceptual stages, not yet a fixed engine graph or synchronous call chain. Components are intended to have bounded responsibilities and communicate through events. Each reasoning result should be explainable and include evidence and confidence where appropriate. Policy is the authority boundary between a recommendation and a production action. Twins and simulations provide ways to test proposed changes without making production the first test environment.
 
+**System definition.** Perceptron SRE is a *Deterministic Distributed Microarchitecture Extensible Framework with Version-Controlled Configuration*. It is **deterministic** (same inputs, configuration, and version yield the same outputs; no runtime learning, retraining, hidden weight adjustment, or model drift; it changes only when humans change configuration, knowledge, or code); **distributed** across domains, engines, stores, knowledge sources, and organizations, not necessarily across machines; a **microarchitecture** of many small specialized components whose behavior emerges through composition; an **extensible framework** that ships a functional core and grows by extension rather than modification of the core; and **version-controlled** in configuration, which is treated as operational knowledge (weights, biases, thresholds, knowledge and store priorities, policy settings) that must be auditable, reproducible, and reviewable. See sections 4.25 and 4.26.
+
 ## 2.1 Architecture diagram set
 
 The [standalone architecture diagrams](diagrams/README.md) provide complementary views of system boundaries, the reasoning cascade, evidence, entity impact, DNS traffic, investigation, twins, policy, telemetry interoperability, federation, incident reporting, and engine governance. They are illustrative companions to the contracts below; they do not resolve open architecture decisions or assert that proposed capabilities are implemented.
@@ -75,7 +77,7 @@ The platform is not, by itself:
 
 ## 4. Foundational principles
 
-The rationale and implementation guidance for these principles are collected in the [Engineering Philosophy](ENGINEERING-PHILOSOPHY.md). The principles below combine established direction with proposed refinements; unresolved choices remain open and must not be silently treated as settled.
+The rationale and implementation guidance for these principles are in sections 4.23-4.29 below. The principles combine established direction with proposed refinements; unresolved choices remain open and must not be silently treated as settled.
 
 ### 4.1 Mission assurance, not monitoring as the end goal
 
@@ -232,7 +234,62 @@ The following guardrails apply to implementation and review:
 5. **Security is reliability evidence:** security-relevant conditions should eventually be assessed with the same evidence, scope, freshness, coverage, and uncertainty semantics as other operational domains. This is a direction for future engines, not a current prototype capability.
 6. **Incidents can inform regression tests, not auto-promote knowledge:** incident-derived scenarios or knowledge require preserved provenance and review; prior success alone does not establish current applicability or authorization.
 
-The [Engineering Philosophy](ENGINEERING-PHILOSOPHY.md) explains these invariants. They do not imply certification to aerospace, medical, or industrial standards; any such claim would require a separate applicable assurance process.
+The remaining sections of this part (4.25-4.29) explain these invariants. They do not imply certification to aerospace, medical, or industrial standards; any such claim would require a separate applicable assurance process.
+
+### 4.25 Core + Extension: Core, Local Operator, Community
+
+Everything in Perceptron SRE follows one pattern: **Core**, **Local Operator**, **Community**.
+
+- **Core** is maintained by the Perceptron SRE engineering team and provides safe, deterministic, well-tested, audited defaults (engines, knowledge, policies, assessments, simulations).
+- **Local Operator** content is maintained privately by the consuming organization (runbooks, custom assessments, knowledge, thresholds, business-specific policies).
+- **Community** content arrives through pull requests and Engine, Knowledge, and Assessment Store packages. Votes, reviews, and comments may influence review and visibility, but popularity is not truth and never becomes production behavior automatically.
+
+Every layer supports all three tiers: Tap Engines, Information Engines, Determination Engines, Assessment Engines, Knowledge Stores, Dashboards, and Simulation Packs each have Core, Local, and Community variants. The platform scales through composition, contribution, and configuration rather than complexity, and the core is extended, not modified.
+
+### 4.26 Reliability through simplicity (embedded-systems philosophy)
+
+Perceptron SRE adopts engineering principles from embedded systems, microcontrollers, FPGA development, spacecraft software, industrial control, and telecommunications infrastructure, not only cloud-native practice. The goal is maximum reliability, not maximum features, and the system that explains failures must never become one. It must not cause incidents such as metrics collection exhausting CPU, logging filling the disk, a reasoning engine consuming excess memory, or the assessment pipeline becoming a bottleneck.
+
+- **Deterministic core, flexible edge:** the core is reliable, deterministic, and efficient; extensions are flexible, customizable, and may be experimental.
+- **Critical path components** (Tap Engines, event bus, core runtime, assessment pipeline, policy runtime) prioritize correctness, determinism, efficiency, stability, and predictability over feature velocity, convenience, or framework complexity.
+- **Resource budgets:** every critical-path component defines CPU, memory, storage, network, and execution budgets; no component may have unlimited growth characteristics. Budgets are declared in engine metadata (RFC-0002) and enforced where the runtime can enforce them; unenforced budgets are labelled as declarations.
+- **Human learning, not machine learning:** the system "learns" through investigation, knowledge, configuration, and human approval. This is forward-only: input through action, with no backpropagation and no runtime retraining. It resembles a feed-forward neural network with added constraints and is called a **Perceptron Neural Network Cascade**.
+
+### 4.27 What "perceptron" means here
+
+The name describes an architectural approach: focused computational units contribute to a larger assessment through explicit contracts. It does **not** mean the current prototype is a trained neural network, nor does the term alone establish a mathematical model, calibrated confidence, or causal inference algorithm.
+
+A one-condition binary rule answers whether one threshold was crossed. A bounded reasoning chain can additionally preserve the measurement's time and scope, identify missing or stale signals, combine related assessments, and explain how the resulting mission status follows from the available evidence. Threshold rules remain useful components; the distinction is composition and traceability of evidence, not a claim that every rule is intelligent.
+
+A perceptron is the smallest reasoning unit that evaluates multiple weighted inputs and produces a confidence-bearing or thresholded determination. Single-input checks typically remain taps, collectors, or simple conditionals. The current Go prototype implements explicit deterministic rules and knowledge patterns; it performs no probabilistic learning, general root-cause inference, or LLM-based decision-making. Claims about confidence, learning, or determinism must match actual behavior and tests. Behavioral change is introduced through reviewed configuration and code changes, never autonomous model mutation.
+
+### 4.28 Complete the learning cycle: Why chain and How chain (Proposed)
+
+An incident report should eventually hold two linked reasoning chains, not only a root cause:
+
+- **Why chain** walks backward through causality: what was observed, its proximate cause, contributing factors, root cause, and process or control gaps.
+- **How chain** walks forward through remediation: what mitigation was applied, how it changed system state, how service or mission function was restored, and why the mitigation worked.
+
+Five links in each chain is a minimum aspiration, not a quota; depth follows evidence, and a shorter chain ending in "unknown" is preferable to padding. Every link carries evidence references, provenance, and uncertainty; numeric confidence applies only once a confidence model exists (RFC-0004). The How chain distinguishes **temporary mitigations** (restart, cache clear, limit increase, queue drain, failover) from **permanent mitigations** (code fix, patch, policy or configuration change, added test, knowledge update); restoring service is not removing the cause, and "the fix worked" must itself be checked against post-mitigation evidence. Human actions (including PES-run procedures, recorded as `human_action` events) are first-class How evidence with attribution; a recorded action is evidence of what was done, not proof it caused recovery and not authorization for repeat. The vocabulary (incident, impact, mitigation, recovery, prevention) is domain-neutral for multiple industries (IT services, industrial control, telecommunications, healthcare technology, energy/utilities); domain profiles may add terminology and regulatory fields but must not weaken evidence, provenance, or review rules. See RFC-0008 section 7.1, RFC-0009 section 6.2, and D-13.
+
+### 4.29 Applying this guidance
+
+When implementing a feature:
+
+1. Identify the applicable RFC, unresolved decisions, and observable acceptance criteria. Follow Document, Review, Approve, Implement, Test, Validate; memos update the design documents before code.
+2. State the scope and semantics of evidence and results; keep status, confidence, coverage, freshness, trust, and authorization distinct.
+3. Specify behavior for missing, stale, contradictory, malformed, and unavailable inputs before implementing a favorable outcome.
+4. Add deterministic fixtures and tests for expected and adverse behavior; use isolated simulation where effects cannot be safely tested in production.
+5. Preserve provenance and explain limitations. Do not describe a prototype, declaration, or process boundary as a production guarantee, security control, or completed capability.
+6. Keep human review and failure escalation usable even when automated reasoning or integrations are degraded.
+
+These principles are guardrails, not a substitute for domain-specific hazard analysis or the approval of an RFC. Dashboards explain reasoning rather than display telemetry: operators see mission, security, and operational state, then drill into assessments, coverage/freshness/confidence, contributing determinations and engines, and finally raw taps and events.
+
+**Quality gates (Security, Testing, Reliability memo).** Testing is a product feature and a feature is not complete without unit, integration, replay, unknown-state, simulation, and architecture tests. Required before release: formatting, linting, static analysis, dependency analysis, unit tests, race tests, and coverage review. Implementation must trace to architecture, an RFC, and acceptance criteria; feature success does not justify architectural failure. Current status: gofmt, `go vet`, and `go test` are run; race tests, dependency analysis, and coverage review are not yet automated (Open).
+
+**Break glass override (Proposed, not built).** A human may order an action the policy layer would not authorize ("I order you to execute"). It requires authentication, authorization, a stated reason, an audit trail, and an incident reference; the human remains the final authority, and the override is itself recorded as Human Action Event evidence. No override path exists in the prototype.
+
+**Dashboard pages (Dashboard Architecture memo).** Page 1 is the Operator Dashboard (assessments, recommendations, confidence, incidents). Page 2 is Domain Exploration: the operator chooses a domain (Host, DNS, Security, Application) and drills through Layer-0 Input, Layer-1 Information, Layer-2 Determinations, Layer-3 Assessment, Layer-4 Recommendation, Layer-5 Policy, Layer-6 Action, and Layer-7 Outcome. Every assessment answers "Why?" and every recommendation answers "What evidence supports this?". Status: the dashboard has a Domains page with a Host / DNS / Security / Application selector that drills through the cascade layers using that domain's events. Host is fully populated; Security shows only evidence and findings; DNS and Application have no engines and explicitly show nothing assessed (not a clearance). Per-domain Information/Determination/Policy layers for Security, DNS, and Application remain Open.
 
 ## 5. System context and boundaries
 
@@ -349,9 +406,39 @@ These rules are architectural proposals from the additional concepts, not finali
 
 **Proposed engine category — meta engines:** in addition to engines that reason about the operated environment, the architecture may classify engines that assess Perceptron SRE itself as meta engines. Examples include event-bus health, engine health, knowledge health/trust, and mission-assurance health. This is a classification for ownership and observability; it does not require separate runtime infrastructure or imply that every named example is a separate plugin.
 
+#### Tap engines and open domains
+
+Tap engines observe, capture, normalize, and publish facts. They do not interpret facts as recommendations, authorize changes, or execute actions; reasoning engines consume their versioned observations, which enables independent testing, replay, and simulation. Domain and category identifiers are extensible data, not a closed set in core code. Initial examples: `host.health`, `host.resources`, `host.security`, `process`, `application`, `database`, `dns`, `network`, `mission`, `policy`, `simulation`; names such as `weather.sleet` and `space.deep_space_link` are valid illustrative extensions. Engine classes: tap engines (Layer-0), Layer-1 perceptrons (information), Layer-2 perceptrons (determinations), assessment, recommendation, policy, action, outcome, and learning engines (Layers 3-8).
+
+#### Contributor contract and engine proof
+
+Every engine package documents: (1) **Purpose**, the operational question; (2) **Inputs**, event types, schemas, source/scope, freshness, required/optional; (3) **Processing**, bounded inspectable rules or model semantics including conflict handling; (4) **Outputs**, event types, schemas, status semantics, derivation links, claims; (5) **Unknown conditions**, behavior for missing, stale, contradictory, invalid, and unavailable input; (6) **Confidence**, optional and claim-specific, never inferred from coverage or emitted without calibration semantics; (7) **Tests**, normal, boundary, failure, unknown, and synthetic scenarios; (8) **Operations and safety**, version, owner, determinism/state, resource budgets, requested capabilities, policy profile, platform support, dependencies, upgrade/rollback.
+
+Each derived claim carries an evidence-linked explanation: what was assessed, why, supporting and contradictory evidence, and what prevents a stronger conclusion. This "engine proof" is an explanation and provenance contract, not a mathematical proof. Perceptron examples must distinguish threshold scripts from multi-signal weighted reasoning; weights and thresholds need domain justification and tests. The v0.1 runtime is deterministic rule-based and emits no confidence scores.
+
+#### Plugin ecosystem and adoption gates
+
+Everything outside the core runtime trends toward plugin-style packaging (engines, taps, simulation bundles, dashboard and knowledge extensions). Contributors declare inputs, outputs, purpose, tests, and simulation fixtures; core services own registration lifecycle, runtime governance, visualization contracts, and storage interfaces. Capabilities are adopted incrementally: update the RFC, implement versioned contracts, add conformance and failure tests, document operational limits. The application remains observe-only; subprocess execution is not a sandbox; no simulation, confidence value, human override, tool declaration, or process boundary grants execution authority. Open: manifest and proof schema, tap lifecycle and access boundaries, domain namespace governance, snapshot privacy and retention, PES authentication and redaction, emergency human override semantics.
+
 ### 6.4 Reasoning cascade
 
 The cascade groups reasoning by increasing abstraction. Pressure is the proposed primitive derived operational signal after raw observations; it feeds health, which feeds impact and mission assessment. The names below are conceptual categories assembled from the source material, not a finalized dependency graph.
+
+**Canonical layers (Knowledge Base memo).** Reasoning flows forward only: Input → Information → Determinations → Assessment → Recommendation → Policy → Action, followed by Outcome and Learning. Layers are written `Layer-<number> <Label>` in dashboards, reports, code, and documents. The memo leaves Input unnumbered while fixing Layer 1 = Information and Layer 2 = Determinations, so Input is Layer-0. Each layer also supports Core, Local, and Community contributions (section 4.25).
+
+| Layer | Purpose | Produces | Source file |
+|---|---|---|---|
+| Layer-0 Input | Tap Engines collect observations | Observations only | `internal/observe` |
+| Layer-1 Information | Observations (for example CPU plus load) become information (CPU pressure); not conclusions | Information | `engine/layer1_information.go` |
+| Layer-2 Determinations | Information becomes determinations (for example disk latency plus low CPU = storage bottleneck) | Determinations | `engine/layer2_determination.go`, `layer2_security.go` |
+| Layer-3 Assessment | Determinations become operational assessments (host, security, DNS, mission health) | Assessments | `engine/layer3_assessment_*.go` |
+| Layer-4 Recommendation | Assessments become recommendations (restart service, scale workers, escalate to human) | Recommendations | `engine/layer4_recommendation.go` |
+| Layer-5 Policy | Can we do this? Authorized, require approval, simulation only, denied | Policy decisions | `engine/layer5_policy.go` |
+| Layer-6 Action | Authorized recommendations become actions (execute script, restart service, page engineer) | Actions | `engine/layer6_action.go` |
+| Layer-7 Outcome | Did the action work? Resolved, improved, unchanged, worse | Outcomes | `engine/layer7_outcome.go` |
+| Layer-8 Learning | Outcome, investigation, Five Whys and Five Hows become knowledge, simulations, regression tests | Learning candidates, reviewed by humans | `engine/layer8_learning.go` |
+
+Implementation status: Layers 0-8 exist as engines. Open: Layer-2 determinations do not yet feed Layer-3 health or mission; Layer-4 currently consumes determinations instead of assessments; Layer-6 records actions but no executor exists; Layer-7 never attributes an outcome to an action; Layer-8 emits candidates only. Raw data becomes information, then understanding, recommendations, actions, and operational experience; the immediate priority is the knowledge base for common host conditions so that Layer-2 determinations and Layer-3 assessments produce meaningful reasoning.
 
 | Conceptual stage | Example inputs | Example derived outputs |
 |---|---|---|
@@ -396,6 +483,16 @@ The investigation framework coordinates a progression such as detection → evid
 
 The knowledge system stores incidents, FAQs, runbooks, near misses, and remediation history. It should make age, use, success, twin validation, and human validation available as evidence relevant to trust. Knowledge retrieval should inform investigation and recommendation without making a stored runbook unconditionally authoritative.
 
+The Knowledge Store is a first-class subsystem that translates information, determinations, and historical experience into assessments. Priority: knowledge creation comes before additional Tap Engines, because metrics become assessments only when combinations of observations are interpreted. The target is common operational patterns (CPU, memory, storage, network, services, security), never exhaustive combinations.
+
+Knowledge has three sources, Core (Perceptron SRE), Local (operator), and Community (contributors), selected by operator-configured weights (for example Core 60 / Local 30 / Community 10, or Core 20 / Local 70 / Community 10). Assessments preserve provenance, source, confidence where defined, and coverage when sources disagree. A weight is source precedence, not confidence. Implemented: Core patterns, Local and Community pattern lists, weights (default 30/60/10), and per-determination source; not implemented: package distribution, signing, voting, and review workflow.
+
+**Pattern semantics.** A pattern has `all` and optional `any` conditions over cataloged metrics (`>=`, `>`, `<`, `elevated`, `normal`); `elevated`/`normal` apply only to metrics the pressure engine evaluates. Unavailable, stale, or missing evidence never matches (unknown is neither a match nor health). Critical evidence raises a WARNING pattern to CRITICAL. Each determination cites its evidence events and knowledge source. A Local pattern with a Core ID replaces it; `knowledge.disabled_patterns` removes patterns; on an ID collision the highest-weight source wins (ties: local, core, community) and a zero weight ignores a source.
+
+**Domain roadmap.** Implemented (19 core patterns): CPU, memory, storage, network (partial), system limits. Not yet: Services (no inputs) and Security patterns over host metrics (security-posture handles supplied evidence separately). Rate patterns use short two-sample rates and are noisy; `oom_kills_total` is historical. Absence of a determination is not evidence of health.
+
+**Engine configuration.** Engines run in the listed order: `host-pressure`, `host-determination`, `host-health`, `host-recommendation`, `host-policy`, `host-action`, `host-outcome`, `host-learning`. Config files listing engines explicitly must include the later engines; they produce nothing on cycles with no determinations. Open: determinations do not yet feed health or mission; Security and Services determinations; an action executor and approval workflow; durable outcome history across restarts; PES.
+
 The storage model, retrieval method, trust calculation, retention policy, and review workflow remain open.
 
 ### 6.7 Twin system
@@ -414,6 +511,14 @@ Simulation answers "what if?" questions using production-derived telemetry, hist
 Simulation and twin validation are related but different: a twin evaluates a proposed change against a representative environment; a simulation estimates outcomes under a modeled scenario. Exact boundaries and interfaces remain open.
 
 As a potential confidence and knowledge input, a successful twin validation may contribute evidence to renew trust in a runbook, remediation, or hypothesis. Trust renewal must be scoped to what was actually tested and observed; it must not imply universal correctness or bypass policy.
+
+#### Event origin and human operations
+
+Events carry an explicit, validated origin that propagates through derived outputs: `live`, `simulation`, `replay`, or `human_action` (schema governed by RFC-0001). Simulated or replayed data stays distinguishable from live observations; simulation-origin events may be reasoned over and displayed but never authorize production execution. Human actions are evidence, not proof of correctness. An action record identifies actor, host/entity, time, command or procedure reference, incident context, and provenance (subject to privacy and secret redaction), and distinguishes a human-reported action from one verified by a tap or control plane. The proposed Perceptron Engineering Shell (PES) may eventually run approved legacy commands while recording attributable human-action events; this does not authorize arbitrary command execution, privilege escalation, or capture of secret-bearing arguments. Before implementation define authentication, actor identity, allow/deny behavior, redaction, failure semantics, audit durability, and a threat model; PES preserves the command's exit semantics and cannot claim success merely because a command launched. PES is not built.
+
+#### Simulation, dry run, and execution
+
+Simulation evaluates synthetic inputs, captured snapshots, or explicit overrides without production effects. A dry run validates or predicts a proposed operation without executing it and states which inputs and side effects are excluded. A real run executes only through a separately authorized production path and is implied by neither. Snapshot simulation should support capture, immutable snapshot identity, explicit overrides, and rerun through the pipeline, showing baseline, overrides, versions, output, and provenance; production snapshots need data minimization, access control, retention rules, and separation from live streams. Simulation is isolated from production action adapters by construction. A human override requires authenticated identity, authorization, reason, incident reference, explicit scope, and durable audit, and produces a human-action event; authority and emergency semantics remain open in RFC-0010. Humans remain accountable decision-makers; the system observes, reasons, explains, recommends, validates, and escalates.
 
 ### 6.9 Policy and remediation
 
@@ -519,7 +624,31 @@ Perceptron SRE should integrate with existing monitoring rather than replace it.
 
 Adapters preserve source, scope, time, freshness, and provenance. Unknown/unavailable input remains explicit, and export failures/cardinality limits must be visible. See [RFC-0012](RFC-0012-engine-store-and-telemetry-interoperability.md).
 
-### 8.4 Deployment locations
+### 8.4 Repository architecture and configuration
+
+The repository should teach the architecture: a new engineer should learn Core, Stores, Configuration, Domains, and Contributions by navigating it. Its structure mirrors the application architecture (architectural symmetry): **Core / Local / Community** appear everywhere, and the layers **Observations, Information, Determinations, Assessments, Recommendations, Policies, Actions** (then Outcomes and Learning) appear consistently across code, dashboards, stores, and documentation.
+
+Configuration is organized by **domain** (`host/`, `network/`, `security/`, `dns/`, `application/`) rather than one global model, for low coupling, safer changes, easier review, and simpler version control. Configuration is version-controlled operational knowledge.
+
+Current layout (source files carry the layer name, `layer<N>_<name>.go`):
+
+```
+DesignDocuments/        architecture, RFCs, diagrams
+Implementation/         roadmap
+main/                   Go core (module perceptronsre)
+  perceptron.json       core configuration (transitional single file)
+  config.d/<domain>.json   per-domain configuration (host, security, ...); see CHANGELOG
+  cmd/perceptron/       entry point
+  internal/observe      Layer-0 Input (Tap Engines)
+  internal/engine       Layers 1-8 (layer1_information.go ... layer8_learning.go)
+  internal/knowledge    Knowledge Store: core.go (Core), local and community patterns from configuration
+  internal/{metrics,model,config,dashboard,report,simulation,telemetry,bus}
+  external/             Local and Community engines (out-of-process, any language)
+```
+
+Not yet built: separate Core/Local/Community directories for every layer, Store package distribution, and resource-budget enforcement.
+
+### 8.5 Deployment locations
 
 The design notes envision Perceptron SRE functions deployed near several operational domains:
 

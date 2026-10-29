@@ -130,6 +130,7 @@ Mission assurance informs response; RFC-0010 remains responsible for action auth
 8. How is Perceptron SRE independently monitored?
 9. How are state transitions, trajectory, hysteresis, and recovery/closure handled? Trajectory such as stable, improving, or degrading may distinguish otherwise identical mission states, but its semantics remain open.
 10. Is a mission defined by both scope and objective, and how are objectives represented (ARCH-035)?
+11. Mission assessment is Layer-3 Assessment in the canonical cascade (Overall Architecture 6.4). In the prototype, Layer-2 determinations do not yet feed health or mission; how and when they should is open.
 
 ## 13. Dependencies
 

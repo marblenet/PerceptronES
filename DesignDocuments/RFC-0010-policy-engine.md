@@ -98,6 +98,10 @@ Candidate outcomes include permit, deny, hold for approval, require additional v
 
 Policy constraints govern action eligibility; they must not be treated as evidence that a factual hypothesis is correct. Policy evaluation confidence, if represented, describes confidence in the evaluation result—not confidence in a root cause or proposed action's effectiveness—and remains an open design choice.
 
+### 8.1 Layer-5 Policy in the cascade (implemented prototype)
+
+In the canonical cascade (Overall Architecture 6.4), **Layer-5 Policy** answers "Can we do this?" for each **Layer-4 Recommendation** and produces policy decisions only. The prototype `host-policy` engine emits `policy.decision.v1` with one of four decisions: `authorized`, `require_approval`, `simulation_only`, or `denied`. The decision comes from configuration (`policy.default_decision`, default `require_approval`, with optional per-recommendation `policy.rules`); a recommendation, confidence, or simulation never raises it. Simulation- or replay-origin recommendations are never `authorized`. **Layer-6 Action** (`host-action`) turns a decision into an action record with `executed: false` always, because no capability broker, approval workflow, or executor exists; nothing in the prototype can carry out an action. **Layer-7 Outcome** (`host-outcome`) reports `resolved`, `improved`, `unchanged`, `worse`, or `unknown` for a determined condition by comparing live cycles in memory; it never attributes an outcome to an action and `resolved` requires fresh evidence. **Layer-8 Learning** (`host-learning`) emits learning candidates (a regression-test proposal when resolved, a knowledge-review proposal when worse) that are never applied automatically. Open: approval workflow and authority, durable decision/outcome history, binding a decision to exact tool, arguments, and scope, and the meaning of `simulation_only` for real adapters.
+
 ## 9. Emergency controls and safe mode
 
 Candidate controls named in the project context:

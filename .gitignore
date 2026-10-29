@@ -1,7 +1,13 @@
+# input memo's
+/DesignDocuments/memos/*
+/DesignDocuments/Memos/*
+
 # Local runtime configuration and generated binaries.
 /main/perceptron.json
 /main/perceptron.exe
 /main/perceptron-linux-amd64
+/perceptron-linux-amd64
+*.key
 
 # Go build/test output.
 *.test

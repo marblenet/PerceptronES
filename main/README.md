@@ -2,7 +2,7 @@
 
 This directory contains the first single-host Go binary. It implements a deliberately narrow **observe → reason → explain** path. The reviewed architecture and implementation roadmap remain the source documents; this README records the executable's provisional choices and current limits without changing those documents.
 
-The project's reliability rationale and cross-cutting engineering guardrails are documented in [Engineering Philosophy](../DesignDocuments/ENGINEERING-PHILOSOPHY.md). In this prototype, that means explicit unknowns and visible failures—not claims of safety certification, trained neural-network reasoning, calibrated confidence, or production-grade autonomy.
+The project's reliability rationale and cross-cutting engineering guardrails are documented in [Overall Architecture sections 4.23-4.29](../DesignDocuments/01-overall-architecture.md). In this prototype, that means explicit unknowns and visible failures—not claims of safety certification, trained neural-network reasoning, calibrated confidence, or production-grade autonomy.
 
 ## Requirements
 
@@ -23,17 +23,30 @@ On Linux, omit the `.exe` suffix. Without flags the program collects one snapsho
 
 ### Local dashboard
 
-Run a continuously refreshed, read-only dashboard bound only to IPv4 loopback:
+Run a continuously refreshed dashboard, bound to IPv4 loopback by default:
 
 ```bash
 ./perceptron-linux-amd64 --web
 ```
 
-Open `http://127.0.0.1:8080` on the same machine. Dashboard mode implies repeated collection, using the default 15-second cycle interval; the page refreshes its report every 3 seconds. Change the cycle interval with `--interval 30s` and the local-only port with `--web-port 8081`. The dashboard never listens on a public or LAN interface. If the selected port is already in use, startup fails explicitly.
+Open `http://127.0.0.1:8080` on the same machine. Dashboard mode implies repeated collection, using the default 15-second cycle interval; the page refreshes its report every 3 seconds. Change the cycle interval with `--interval 30s`. If the selected port is already in use, startup fails explicitly.
 
-The dashboard uses a top-down decision pyramid: mission state and recommended next step at the top; evidence-based root-cause assessment, reasoning engines, and component health below; then raw observations, log-stream guidance, and a chronological event/provenance record. The diagnosis is labeled as leading evidence, not a causal claim beyond what the measurements support. It keeps engine execution status separate from component health and shows unknown/unavailable evidence explicitly. Operations and Engine Store are separate pages; the Store lists bundled and locally declared engines, their categories, event contracts, policy declarations, and enablement state. Collector settings remain core configuration; thresholds and settings are grouped under the engine that owns them. The top recommendation control is **Run read-only refresh**: it queues one fresh host observation cycle; it does not run shell commands or make host changes. Runtime logs are emitted to stderr (typically collected by the system journal under systemd) and are not embedded in the dashboard.
+**Listen address.** Set it in `perceptron.json` (read at startup; changes need a restart and cannot be edited from the web UI):
 
-The latest complete assessment is available as JSON from `/api/report` and `/api/findings`; Prometheus-compatible current-cycle metrics are exposed at `/metrics` for existing scrapers such as Prometheus/Grafana. The metrics endpoint is a scrape projection, not a remote-write exporter, alert router, or durable history. The dashboard still binds to loopback only.
+```json
+"dashboard": {
+  "listen_address": "10.0.0.5",
+  "port": 8080,
+  "allowed_hosts": ["200.100.100.10"],
+  "allow_remote_config": false
+}
+```
+
+`--web-addr` and `--web-port` override the file. `listen_address` must be a literal IP (`0.0.0.0` binds all IPv4 interfaces). `allowed_hosts` lists extra Host header values (name or name:port) for access through a public IP, NAT or DNS name; the listener's own address (or all local interface addresses for `0.0.0.0`) is always accepted, and anything else gets 403. On a non-loopback bind, config editing through the web is disabled unless `allow_remote_config` is true, and a warning is logged. There is **no authentication or TLS**: also restrict access with the host firewall (`firewall-cmd`) and the cloud security list, or keep loopback and use an SSH tunnel.
+
+The dashboard uses a top-down decision pyramid: mission state and recommended next step at the top; evidence-based root-cause assessment, reasoning engines, and component health below; then raw observations, log-stream guidance, and a chronological event/provenance record. The diagnosis is labeled as leading evidence, not a causal claim beyond what the measurements support. It keeps engine execution status separate from component health and shows unknown/unavailable evidence explicitly. Operations and Store are separate pages; the Store lists bundled and locally declared engines tagged with the cascade layer they apply to (filter by layer or search), their categories, event contracts, policy declarations, and enablement state. Collector settings remain core configuration; thresholds and settings are grouped under the engine that owns them. The top recommendation control is **Run read-only refresh**: it queues one fresh host observation cycle; it does not run shell commands or make host changes. Runtime logs are emitted to stderr (typically collected by the system journal under systemd) and are not embedded in the dashboard.
+
+The latest complete assessment is available as JSON from `/api/report` and `/api/findings`; Prometheus-compatible current-cycle metrics are exposed at `/metrics` for existing scrapers such as Prometheus/Grafana. The metrics endpoint is a scrape projection, not a remote-write exporter, alert router, or durable history. The dashboard binds to loopback unless configured otherwise.
 
 The timeline currently contains only events from the latest in-memory assessment cycle. It does not yet retain the 60 seconds before an incident, record a mitigation event, or capture the five-minute post-mitigation recovery window, so it cannot yet produce the requested time-bounded incident report. This prototype has no remediation tools, confidence-based execution, or action authorization; future action tools must be introduced behind the policy and approval boundary rather than by enabling automatic execution in this dashboard.
 
@@ -43,7 +56,7 @@ When the binary is running on a remote Oracle Linux host, use an SSH local port 
 ssh -L 8080:127.0.0.1:8080 perceptron-oracle
 ```
 
-Then open `http://127.0.0.1:8080` in the client browser. The SSH connection remains open while forwarding is active. The dashboard has no authentication of its own; loopback binding and the SSH tunnel are its access boundary, so do not expose the listener through a proxy or change it to a non-loopback bind without adding an appropriate access-control design.
+Then open `http://127.0.0.1:8080` in the client browser. The SSH connection remains open while forwarding is active. The dashboard has no authentication of its own; loopback binding and the SSH tunnel are its default access boundary. A non-loopback `listen_address` is an explicit opt-in that relies on firewall/security-list controls instead.
 
 The app reads `perceptron.json` from the current directory by default and creates it with initial values when it does not exist. Use `--config path/to/config.json` to select another file. The file is checked before each collection cycle; a valid external edit is applied on the next cycle without restarting. Invalid edits are logged and the last-known-good configuration remains active. Dashboard edits are validated, atomically written to that same file, and applied on the next assessment cycle.
 

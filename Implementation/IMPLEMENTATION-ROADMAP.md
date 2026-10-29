@@ -184,9 +184,13 @@ Rules:
 Implement the baseline cascade, plus optional security evidence when its engine is enabled:
 
 ```text
-Observation → Pressure → Health → Mission assessment
+Layer-0 Input → Layer-1 Information (pressure) → Layer-2 Determinations (knowledge patterns)
+  → Layer-3 Assessment (health, mission) ; Layer-2 → Layer-4 Recommendation
+  → Layer-5 Policy → Layer-6 Action (record only) → Layer-7 Outcome → Layer-8 Learning (candidates)
 Security evidence → Security posture finding ──────┘
 ```
+
+Status: Layers 0–8 exist in the prototype (RFC-0002 6.1). Open: determinations do not yet feed Layer-3; there is no executor or approval workflow. Configuration supports a configurable listen address and `config.d/<domain>.json` domain overlays.
 
 Use transparent, deterministic initial rules. Avoid machine learning, LLMs, inferred root cause, automated investigation, policy actions, and hidden threshold defaults.
 

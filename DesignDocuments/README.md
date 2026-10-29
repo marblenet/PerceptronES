@@ -10,20 +10,18 @@ Perceptron SRE uses a documentation-first engineering workflow: document, review
 
 ## Reading order
 
-1. [Engineering Philosophy](ENGINEERING-PHILOSOPHY.md) — rationale behind the evidence, reliability, determinism, and safety guardrails.
-2. [Overall Architecture](01-overall-architecture.md) — system purpose, boundaries, logical components, principal workflows, and architecture decisions still open.
-3. [RFC index](RFC-INDEX.md) — status, dependency notes, and proposed implementation order for the first ten contracts.
-4. RFC-0001 through RFC-0004 — event model, engine runtime, operational entities, evidence and confidence.
-5. RFC-0010 — policy and safety governance.
-6. RFC-0008 and RFC-0009 — investigation and organizational knowledge.
-7. RFC-0006 — twin architecture.
-8. RFC-0005 — DNS Traffic Handler.
-9. RFC-0007 — mission assurance.
-10. [RFC-0012: Engine Store and Telemetry Interoperability](RFC-0012-engine-store-and-telemetry-interoperability.md) — engine catalog, package governance, and legacy metrics interoperability.
-Incident Why/How chains (proposed) are described in [Engineering Philosophy](ENGINEERING-PHILOSOPHY.md), RFC-0008 section 7.1, RFC-0009 section 6.2, and [D-13](diagrams/D-13-why-how-chains.md).
+1. [Overall Architecture](01-overall-architecture.md) — system definition and purpose, engineering philosophy (4.23-4.29), Core + Extension, canonical Layer-# cascade, knowledge system, engine contributor contract, simulation and event origin, repository architecture, and architecture decisions still open.
+2. [RFC index](RFC-INDEX.md) — status, dependency notes, and proposed implementation order for the first ten contracts.
+3. RFC-0001 through RFC-0004 — event model, engine runtime, operational entities, evidence and confidence.
+4. RFC-0010 — policy and safety governance.
+5. RFC-0008 and RFC-0009 — investigation and organizational knowledge.
+6. RFC-0006 — twin architecture.
+7. RFC-0005 — DNS Traffic Handler.
+8. RFC-0007 — mission assurance.
+9. [RFC-0012: Engine Store and Telemetry Interoperability](RFC-0012-engine-store-and-telemetry-interoperability.md) — engine catalog, package governance, and legacy metrics interoperability.
+10. Follow-on RFCs in the overall architecture roadmap — simulation, DNS integration, security, deployment, and other concerns.
 
-11. [Engine Platform Addendum](ENGINE-PLATFORM-ADDENDUM.md) — tap engines, contributor proof contracts, event origins, human-operation records, and simulation boundaries.
-12. Follow-on RFCs in the overall architecture roadmap — simulation, DNS integration, security, deployment, and other concerns.
+Incident Why/How chains (proposed) are described in Overall Architecture section 4.28, RFC-0008 section 7.1, RFC-0009 section 6.2, and [D-13](diagrams/D-13-why-how-chains.md).
 
 ## Architecture diagrams
 

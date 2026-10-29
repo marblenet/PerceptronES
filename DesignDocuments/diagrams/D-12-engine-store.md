@@ -8,7 +8,7 @@ flowchart TD
     Package["Versioned package:\nmanifest, contracts, settings,\nprovenance, policy declaration"]
     Review["Review source, version, dependencies,\nprivileges, compatibility, and tests"]
     Install["Operator installs under\nmain/external/<engine-name>"]
-    Catalog["Local Engine Store catalog"]
+    Catalog["Local Engine Store catalog\n(Core / Local / Community sources)"]
     Configure["Engine-owned settings\nvalidated by schema"]
     Select{"Operator enables\ncompatible engine?"}
     Runtime["Runtime validates contracts,\nresource bounds, and order"]

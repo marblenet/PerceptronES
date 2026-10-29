@@ -170,7 +170,7 @@ func RunSnapshot(ctx context.Context, cfg config.Config, snapshotCycleID string,
 func execute(ctx context.Context, cfg config.Config, name, label string, inputs Inputs, observations []model.Observation, evidence []config.SecurityEvidence, snapshotOf string) (Result, error) {
 	applyMeasurementInputs(observations, inputs)
 	simulationConfig := cfg
-	simulationConfig.Engines = []string{"host-pressure", "host-health", "security-posture"}
+	simulationConfig.Engines = []string{"host-pressure", "host-determination", "host-health", "host-recommendation", "host-policy", "host-action", "host-outcome", "host-learning", "security-posture"}
 	simulationConfig.SecurityRequiredChecks = []string{"sample-security-control"}
 	simulationConfig.SecurityEvidence = evidence
 	runtime, err := engine.NewRuntime(simulationConfig)

@@ -164,6 +164,8 @@ Investigation state transitions and evidence access must be auditable. Repeated 
 
 ## 13. Open decisions
 
+Note: the prototype's advisory recommendations are Layer-4 Recommendation outputs (RFC-0002 6.1); they are not investigations, and policy (RFC-0010 8.1) gates them.
+
 1. What signals or policies initiate investigations?
 2. Who/what owns investigation lifecycle and incident association?
 3. How are tools selected, sequenced, bounded, and permissioned?

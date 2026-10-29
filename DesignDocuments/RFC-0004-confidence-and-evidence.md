@@ -167,6 +167,8 @@ An estimate must not be displayed as confirmed customer harm. Source, time windo
 
 ## 13. Open decisions
 
+Note: Knowledge Store source weights (Core/Local/Community, RFC-0009 6.3) are precedence settings, not confidence; they must not be presented or combined as confidence.
+
 1. Which confidence types are required for the first engine contracts, including observation, hypothesis, impact, prediction, action, and outcome confidence?
 2. Is confidence numeric, categorical, calibrated, or a combination?
 3. Must every engine output include confidence, or only derived/probabilistic claims?

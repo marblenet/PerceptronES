@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"os"
 	"strings"
 	"time"
 
+	"perceptronsre/internal/knowledge"
 	"perceptronsre/internal/metrics"
 )
 
@@ -25,7 +27,49 @@ type Thresholds struct {
 	LoadPerCPU        Threshold `json:"load_per_cpu"`
 }
 
+type DashboardConfig struct {
+	// ListenAddress is a literal IP address; hostnames are not resolved.
+	ListenAddress string `json:"listen_address"`
+	Port          int    `json:"port"`
+	// AllowedHosts lists extra Host header values (name or name:port) accepted
+	// when the dashboard is reached through NAT, a public IP, or a DNS name.
+	AllowedHosts []string `json:"allowed_hosts,omitempty"`
+	// AllowRemoteConfig permits PUT /api/config on a non-loopback listener.
+	AllowRemoteConfig bool `json:"allow_remote_config,omitempty"`
+}
+
+// IsLoopback reports whether the configured address is a loopback address.
+func (d DashboardConfig) IsLoopback() bool {
+	ip := net.ParseIP(d.ListenAddress)
+	return ip != nil && ip.IsLoopback()
+}
+
+// KnowledgeConfig holds operator (local) knowledge. A local pattern whose ID
+// matches a core pattern replaces it; disabled IDs are removed.
+type KnowledgeConfig struct {
+	LocalPatterns     []knowledge.Pattern `json:"local_patterns,omitempty"`
+	CommunityPatterns []knowledge.Pattern `json:"community_patterns,omitempty"`
+	DisabledPatterns  []string            `json:"disabled_patterns,omitempty"`
+	// Weights pick the winner when sources define the same pattern ID.
+	// Omitted or all zero selects core 30 / local 60 / community 10.
+	Weights knowledge.Weights `json:"weights"`
+}
+
+// PolicyConfig decides what may be done about a recommendation. Rules are
+// keyed by pattern ID or "domain:<domain>"; values are authorized,
+// require_approval, simulation_only, or denied. No executor exists, so even
+// "authorized" does not run anything in this build.
+type PolicyConfig struct {
+	DefaultDecision string            `json:"default_decision"`
+	Rules           map[string]string `json:"rules,omitempty"`
+}
+
+var policyDecisions = map[string]bool{"authorized": true, "require_approval": true, "simulation_only": true, "denied": true}
+
 type Config struct {
+	Dashboard              DashboardConfig      `json:"dashboard"`
+	Knowledge              KnowledgeConfig      `json:"knowledge"`
+	Policy                 PolicyConfig         `json:"policy"`
 	HostID                 string               `json:"host_id"`
 	FilesystemPaths        []string             `json:"filesystem_paths"`
 	DNSProbeName           string               `json:"dns_probe_name,omitempty"`
@@ -71,6 +115,7 @@ type EnginePolicy struct {
 
 func Default() Config {
 	return Config{
+		Dashboard:         DashboardConfig{ListenAddress: "127.0.0.1", Port: 8080},
 		HostID:            "localhost",
 		FilesystemPaths:   []string{"/"},
 		DNSProbeTimeout:   "2s",
@@ -82,7 +127,8 @@ func Default() Config {
 			FilesystemPercent: Threshold{Warning: 85, Critical: 95},
 			LoadPerCPU:        Threshold{Warning: 1.5, Critical: 3},
 		},
-		Engines: []string{"host-pressure", "host-health"},
+		Engines: []string{"host-pressure", "host-determination", "host-health", "host-recommendation", "host-policy", "host-action", "host-outcome", "host-learning"},
+		Policy:  PolicyConfig{DefaultDecision: "require_approval"},
 	}
 }
 
@@ -100,10 +146,21 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("load config %q: %w", path, err)
 	}
-	return cfg, nil
+	return applyDomainDir(cfg, path)
 }
 
 func (cfg Config) Validate() error {
+	if ip := net.ParseIP(cfg.Dashboard.ListenAddress); ip == nil {
+		return fmt.Errorf("dashboard.listen_address %q must be a literal IPv4 or IPv6 address", cfg.Dashboard.ListenAddress)
+	}
+	if cfg.Dashboard.Port < 0 || cfg.Dashboard.Port > 65535 {
+		return errors.New("dashboard.port must be between 0 and 65535")
+	}
+	for index, host := range cfg.Dashboard.AllowedHosts {
+		if strings.TrimSpace(host) == "" || host != strings.TrimSpace(host) || strings.ContainsAny(host, "/@ ") {
+			return fmt.Errorf("dashboard.allowed_hosts[%d] must be a host or host:port value", index)
+		}
+	}
 	if strings.TrimSpace(cfg.HostID) == "" {
 		return errors.New("host_id must not be empty")
 	}
@@ -172,11 +229,28 @@ func (cfg Config) Validate() error {
 			return fmt.Errorf("metric_thresholds[%q] must satisfy 0 <= warning <= critical (and <= 100 for percent metrics)", name)
 		}
 	}
+	if _, err := knowledge.ResolveWeighted(cfg.Knowledge.LocalPatterns, cfg.Knowledge.CommunityPatterns, cfg.Knowledge.DisabledPatterns, cfg.Knowledge.Weights); err != nil {
+		return fmt.Errorf("knowledge: %w", err)
+	}
+	if cfg.Policy.DefaultDecision != "" && !policyDecisions[cfg.Policy.DefaultDecision] {
+		return fmt.Errorf("policy.default_decision %q must be authorized, require_approval, simulation_only, or denied", cfg.Policy.DefaultDecision)
+	}
+	for key, decision := range cfg.Policy.Rules {
+		if strings.TrimSpace(key) == "" || !policyDecisions[decision] {
+			return fmt.Errorf("policy.rules[%q]: decision %q must be authorized, require_approval, simulation_only, or denied", key, decision)
+		}
+	}
 	knownEngines := map[string]bool{
-		"host-pressure":    true,
-		"host-health":      true,
-		"host-mission":     true,
-		"security-posture": true,
+		"host-pressure":       true,
+		"host-recommendation": true,
+		"host-policy":         true,
+		"host-action":         true,
+		"host-outcome":        true,
+		"host-learning":       true,
+		"host-determination":  true,
+		"host-health":         true,
+		"host-mission":        true,
+		"security-posture":    true,
 	}
 	enabledEngines := make(map[string]bool)
 	for index, name := range cfg.Engines {

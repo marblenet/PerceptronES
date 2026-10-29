@@ -33,7 +33,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	watch := flags.Bool("watch", false, "collect repeatedly until interrupted")
 	interval := flags.Duration("interval", 15*time.Second, "delay between watch cycles")
 	web := flags.Bool("web", false, "serve a live read-only dashboard on localhost (implies --watch)")
-	webPort := flags.Int("web-port", 8080, "localhost dashboard port (0 selects an available port)")
+	webPort := flags.Int("web-port", 8080, "dashboard port; overrides dashboard.port in the config file (0 selects an available port)")
+	webAddr := flags.String("web-addr", "", "dashboard listen IP; overrides dashboard.listen_address in the config file (default 127.0.0.1)")
 	printDefaults := flags.Bool("print-default-config", false, "print the default JSON configuration and exit")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -97,19 +98,32 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var refreshRequests chan dashboard.ToolActivity
 	var activeRefresh *dashboard.ToolActivity
 	if *web {
-		listener, err := dashboard.ListenLoopback(*webPort)
+		listenAddress, listenPort := cfg.Dashboard.ListenAddress, cfg.Dashboard.Port
+		flags.Visit(func(item *flag.Flag) {
+			switch item.Name {
+			case "web-addr":
+				listenAddress = *webAddr
+			case "web-port":
+				listenPort = *webPort
+			}
+		})
+		listener, err := dashboard.Listen(listenAddress, listenPort)
 		if err != nil {
 			logFailure(logger, stderr, "start dashboard failed", map[string]interface{}{"error": err.Error()})
 			return 1
 		}
+		loopback := config.DashboardConfig{ListenAddress: listenAddress}.IsLoopback()
 		refreshRequests = make(chan dashboard.ToolActivity, 1)
 		liveDashboard = dashboard.New(refreshRequests)
 		liveDashboard.SetConfigStore(configStore)
+		hosts := dashboard.AllowedHostsFor(listener.Addr(), cfg.Dashboard.AllowedHosts)
 		if err := liveDashboard.SetAllowedHost(listener.Addr().String()); err != nil {
 			listener.Close()
 			logFailure(logger, stderr, "configure dashboard host restriction failed", map[string]interface{}{"error": err.Error()})
 			return 1
 		}
+		liveDashboard.SetExtraAllowedHosts(hosts)
+		liveDashboard.SetConfigWritesDisabled(!loopback && !cfg.Dashboard.AllowRemoteConfig)
 		server := &http.Server{
 			Handler:           liveDashboard.Handler(),
 			ReadHeaderTimeout: 5 * time.Second,
@@ -126,10 +140,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 				logFailure(logger, stderr, "stop dashboard failed", map[string]interface{}{"error": err.Error()})
 			}
 		}()
-		if err := logger.Emit("info", "local dashboard started", map[string]interface{}{
-			"url":  listener.Addr().String(),
-			"note": "bound to IPv4 loopback only",
-		}); err != nil {
+		startup := map[string]interface{}{
+			"url": listener.Addr().String(),
+		}
+		level := "info"
+		if loopback {
+			startup["note"] = "bound to loopback only"
+		} else {
+			level = "warn"
+			startup["note"] = "bound to a non-loopback address; the dashboard has no authentication or TLS, so restrict access with a firewall or security list"
+			startup["config_editing"] = cfg.Dashboard.AllowRemoteConfig
+		}
+		if err := logger.Emit(level, "local dashboard started", startup); err != nil {
 			fmt.Fprintf(stderr, "write dashboard startup log: %v\n", err)
 			return 1
 		}
